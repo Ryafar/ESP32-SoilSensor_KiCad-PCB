@@ -16,7 +16,7 @@ Hardware: KiCad project *Soil Sensor*, Rev 0.1.0 (Robin Bühler).
 | Battery charger / power-path | BQ25186 (U5) | I²C (0x6A) + INT + CHARGE_EN + POWER_GOOD |
 | 3.3 V rail | XC6220B331MR LDO (U7), fed from charger SYS | — |
 | E-ink display | 8-pin FPC (CON1) | SPI (4-wire) + BUSY/RST/DC + power switch |
-| RGB status LED | Würth WL-ICLED 1312020030000 (U2) | 1-wire (RMT), WS2812-compatible |
+| RGB status LED | Würth WL-ICLED 1312020030000 (U2) | 1-wire (RMT), WS2812-compatible, runs on the 3.3 V rail |
 | Soil probe | 4-pin JST (CON2, S3B-PH-SM4) | ADC + power switch |
 | Battery voltage sense | divider + BSS138 switch | ADC + enable |
 | Buttons | BOOT (SW2), RESET | GPIO9 / EN |
@@ -216,7 +216,7 @@ Keep both load switches OFF and the RGB dark during sleep.
 - **ADC:** ESP-IDF `adc_oneshot` + `adc_cali`. Sample after the rail settles; average several reads. Establish soil dry/wet calibration points empirically. Account for the battery divider ratio when converting `BAT_MEAS` to volts.
 - **I²C:** new `i2c_master` driver. BQ25186 at 0x6A. Configure ICHG = 0x4D on every boot (watchdog note in 4.3). Watch TS/thermistor limits (schematic sets 0 °C cold / 60 °C hot).
 - **SPI e-ink:** write-only; wait on BUSY between commands. Prefer partial refresh; full refresh periodically to clear ghosting.
-- **RGB:** ESP-IDF `led_strip` (RMT backend). The WL-ICLED 1312020030000 uses the standard WS2812 single-wire protocol, so it's a drop-in for the old SK6812 in software. Watch: (1) byte order may be **RGB** not the WS2812-default **GRB** — set it in `led_strip` config if colors are swapped; (2) it's a ~5 V part (rated ~5.5 V) — confirm rail and that GPIO8's 3.3 V logic-high meets its data threshold. Don't drive GPIO8 low at reset.
+- **RGB:** ESP-IDF `led_strip` (RMT backend), wrapped by `components/rgb/`. The WL-ICLED 1312020030000 is listed by Würth as *single wire, 24 bit* and uses the standard WS2812 protocol, so it's a drop-in for the old SK6812 in software. It runs on the **same 3.3 V rail as the ESP32**, so GPIO8's logic level needs no shifter — ignore the 5 V / 5.5 V figures some distributor listings quote. Remaining unknown: byte order may be **RGB** instead of the WS2812-default **GRB**; set `color_component_format` in the `led_strip` config if red and green come out swapped. Don't drive GPIO8 low at reset (strapping pin).
 - **Power switches:** AO3401A are P-FETs — confirm active polarity of `SOIL_POWER` / `PAPER_POWER` on the board (GPIO level ↔ rail on/off mapping).
 - **Ship mode sequencing:** the I²C write that enters ship mode is the last thing the ESP32 does — nothing executes after it (see 3.2).
 - **Console:** UART unused; route all logging over **USB-Serial-JTAG** (GPIO12/13). Set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` in menuconfig.
@@ -246,8 +246,8 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
 - [ ] Low-battery behavior: ship mode (A) vs ESP32 deep sleep (B) — see 3.3.
 - [ ] Confirm 500 mAh cell datasheet allows 1C (500 mA) charge.
 - [ ] Battery divider ratio (to convert BAT_MEAS ADC → volts).
+- [x] RGB supply rail: 3.3 V, shared with the ESP32 — no level shifter needed.
 - [ ] RGB color byte order (RGB vs GRB) — verify once lit.
-- [ ] RGB supply rail / logic-high threshold (~5 V part, 3.3 V data).
 - [ ] Active polarity of `SOIL_POWER`, `PAPER_POWER`, `CHARGE_EN`, `BAT_MEAS_EN`.
 - [ ] Exact e-ink controller (panel driver IC) → picks the display driver/lib.
 - [ ] Soil probe output range (for calibration).

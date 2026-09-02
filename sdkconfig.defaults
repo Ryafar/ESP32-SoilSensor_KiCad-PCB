@@ -1,7 +1,2 @@
 # Project defaults. Delete sdkconfig and re-run `idf.py build` to apply changes.
 CONFIG_IDF_TARGET="esp32c6"
-
-# Addressable status LED (WS2812) of the custom board
-CONFIG_SOILSENSOR_STATUS_LED_GPIO=8
-CONFIG_SOILSENSOR_STATUS_LED_BRIGHTNESS=16
-CONFIG_SOILSENSOR_HEARTBEAT_PERIOD_MS=1000

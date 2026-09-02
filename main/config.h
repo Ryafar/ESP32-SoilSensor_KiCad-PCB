@@ -1,0 +1,58 @@
+/* Board configuration for the Soil Sensor, KiCad project rev 0.1.0.
+ *
+ * Single source of truth for pin assignment and system-wide constants.
+ * Taken from docs/hardware/README.md - keep both in sync when the board
+ * changes. Drivers under components/ stay board-agnostic and receive these
+ * values through their init structs.
+ */
+#pragma once
+
+/* --- E-ink display, SPI (CON1) ------------------------------------------ */
+#define PIN_EPD_BUSY        2   // input
+#define PIN_EPD_RST         3   // output
+#define PIN_EPD_DC          4   // output
+#define PIN_EPD_CS          5   // output
+#define PIN_EPD_CLK         6   // SPI SCLK
+#define PIN_EPD_MOSI        7   // SPI MOSI, display is write-only
+#define PIN_EPD_POWER      23   // load switch for the display rail (AO3401A)
+
+/* --- Soil probe (CON2) --------------------------------------------------- */
+#define PIN_SOIL_MEAS       1   // ADC input
+#define PIN_SOIL_POWER     15   // load switch, power the probe only while sampling
+
+/* --- Battery / charger BQ25186 ------------------------------------------- */
+#define PIN_I2C_SDA        18
+#define PIN_I2C_SCL        19
+#define PIN_CHARGER_INT    20   // input, active low
+#define PIN_CHARGE_EN      21   // output
+#define PIN_POWER_GOOD     22   // input
+#define PIN_BAT_MEAS        0   // ADC input, behind the divider
+#define PIN_BAT_MEAS_EN    16   // BSS138, assert only while reading
+
+/* --- RGB status LED ------------------------------------------------------ */
+/* Wuerth WL-ICLED 1312020030000, WS2812-compatible single-wire protocol.
+ * Strapping pin: must not be held low at reset. */
+#define PIN_RGB_DIN         8
+
+/* --- Buttons ------------------------------------------------------------- */
+#define PIN_BOOT_BUTTON     9   // strapping pin, low at reset -> download mode
+
+/* --- I2C ----------------------------------------------------------------- */
+#define I2C_CLK_HZ          400000
+#define BQ25186_I2C_ADDR    0x6A
+
+/* --- Charger configuration ----------------------------------------------- */
+/* Register 0x04: CHG_DIS = 0, ICHG = 500 mA (code 77). The 10 mA reset default
+ * must be overwritten. The charger watchdog reverts registers after 160 s, so
+ * this gets rewritten on every wake rather than once at first boot. */
+#define BQ25186_REG_ICHG_CTRL       0x04
+#define BQ25186_ICHG_500MA          0x4D
+
+/* --- Battery thresholds -------------------------------------------------- */
+/* Soft threshold, enforced in firmware: below this the board enters ship mode.
+ * The charger's own BUVLO sits at 3.0 V and is only a backstop. */
+#define BATTERY_SHIP_MODE_MV        3300
+
+/* --- Timing -------------------------------------------------------------- */
+#define SOIL_PROBE_SETTLE_MS        50      // after asserting SOIL_POWER
+#define MEASUREMENT_INTERVAL_S      (30 * 60)

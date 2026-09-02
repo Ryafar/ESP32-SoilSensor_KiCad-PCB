@@ -5,20 +5,27 @@ ESP-IDF firmware for the custom plant soil sensor board.
 * Target: **ESP32-C6** (RISC-V)
 * Toolchain: ESP-IDF **v6.0.1**
 
-The firmware currently does nothing but blink the status LED — a bring-up smoke
-test for the new board. Sensor sampling and connectivity build on top of it.
+Bring-up stage: the firmware cycles the RGB status LED through red, green and
+blue and logs which color it just set. Sensor sampling, e-ink and power
+management build on top of that.
 
 ## Repository layout
 
 ```
 CMakeLists.txt        top-level ESP-IDF project file
-sdkconfig.defaults    project defaults (target, pin assignment); sdkconfig itself is generated
+sdkconfig.defaults    project defaults (target etc.); sdkconfig itself is generated
 main/
   main.c              app_main() entry point
-  Kconfig.projbuild   project configuration (menuconfig -> "Soil Sensor Configuration")
+  config.h            pin map and system constants - single source of truth
+components/
+  rgb/                WL-ICLED status LED, on top of espressif/led_strip
 docs/
   hardware/           hardware description: schematic notes, pinout, BOM, board revisions
 ```
+
+Components under `components/` stay board-agnostic: they take pins and
+parameters through their init structs, and `main/config.h` is what supplies the
+board-specific values. Only `main/` includes `config.h`.
 
 ## Build, flash, monitor
 
@@ -31,7 +38,7 @@ idf.py -p COM6 flash monitor   # Ctrl-] to leave the monitor
 ## Configuration
 
 ```sh
-idf.py menuconfig     # -> "Soil Sensor Configuration"
+idf.py menuconfig
 ```
 
 Settings that should hold for everybody belong in `sdkconfig.defaults`; the
