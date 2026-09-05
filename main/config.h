@@ -48,6 +48,15 @@
 #define BQ25186_REG_ICHG_CTRL       0x04
 #define BQ25186_ICHG_500MA          0x4D
 
+/* --- Battery measurement -------------------------------------------------- */
+/* 1:2 divider, 2 x 100 kOhm with 100 nF to GND. Kept as a number rather than a
+ * literal *2 in the code: resistor tolerance means the real ratio is not
+ * exactly 2, so calibrating against a multimeter changes this one constant.
+ * At 4.2 V the ADC sees 2.1 V, which fits ADC_ATTEN_DB_12. */
+#define BATTERY_DIVIDER_RATIO       2.0f
+#define BATTERY_SETTLE_MS           5       // let the 100 nF recharge after enabling
+#define BATTERY_ADC_SAMPLES         16      // averaged per reading
+
 /* --- Battery thresholds -------------------------------------------------- */
 /* Soft threshold, enforced in firmware: below this the board enters ship mode.
  * The charger's own BUVLO sits at 3.0 V and is only a backstop. */

@@ -55,7 +55,7 @@ Read directly from the schematic. **Verify against your own board before flashin
 | INT | GPIO20 | charger interrupt (input, active-low) |
 | CHARGE_EN | GPIO21 | charge enable output |
 | POWER_GOOD | GPIO22 | input from charger |
-| BAT_MEAS | GPIO0 | ADC input (via divider) — separate channel from soil |
+| BAT_MEAS | GPIO0 | ADC input, 1:2 divider (2 × 100 kΩ) with 100 nF to GND |
 | BAT_MEAS_EN | GPIO16 | enables the battery divider (BSS138) — assert only when reading |
 
 > **ADC note:** `BAT_MEAS` (GPIO0) and `SOIL_MEAS` (GPIO1) are **two separate ADC channels**. The ESP32-C6 has a single SAR ADC, so the two are converted sequentially, not truly simultaneously — but firmware just reads one then the other, so both are effectively available without powering either down for the other. The real constraint is the enables: battery reads require `BAT_MEAS_EN` (GPIO16) asserted to switch in the divider, and soil reads require `SOIL_POWER` (GPIO15) to power the probe. Both are independent and could be on together, but for power saving, assert each only around its own measurement.
@@ -213,7 +213,8 @@ Keep both load switches OFF and the RGB dark during sleep.
 
 ## 7. Key implementation notes
 
-- **ADC:** ESP-IDF `adc_oneshot` + `adc_cali`. Sample after the rail settles; average several reads. Establish soil dry/wet calibration points empirically. Account for the battery divider ratio when converting `BAT_MEAS` to volts.
+- **ADC:** ESP-IDF `adc_oneshot` + `adc_cali`. Sample after the rail settles; average several reads. Establish soil dry/wet calibration points empirically.
+- **Battery divider:** 2 × 100 kΩ, so `VBAT = 2 × ADC`. At a full 4.2 V cell the ADC sees 2.1 V, which fits `ADC_ATTEN_DB_12` (usable to ~2.9 V) with headroom. The 100 nF to GND buffers the ADC's sample-and-hold charge injection, so the 100 kΩ source impedance is not a problem — but the cap needs time to recharge after `BAT_MEAS_EN` is asserted, so settle before the first conversion and discard it. The exact factor is a constant in `main/config.h`, not a literal `* 2`: resistor tolerance means the real ratio is not exactly 2, and calibrating against a multimeter should touch one number.
 - **I²C:** new `i2c_master` driver. BQ25186 at 0x6A. Configure ICHG = 0x4D on every boot (watchdog note in 4.3). Watch TS/thermistor limits (schematic sets 0 °C cold / 60 °C hot).
 - **SPI e-ink:** write-only; wait on BUSY between commands. Prefer partial refresh; full refresh periodically to clear ghosting.
 - **RGB:** ESP-IDF `led_strip` (RMT backend), wrapped by `components/rgb/`. The WL-ICLED 1312020030000 is listed by Würth as *single wire, 24 bit* and uses the standard WS2812 protocol, so it's a drop-in for the old SK6812 in software. It runs on the **same 3.3 V rail as the ESP32**, so GPIO8's logic level needs no shifter — ignore the 5 V / 5.5 V figures some distributor listings quote. Remaining unknown: byte order may be **RGB** instead of the WS2812-default **GRB**; set `color_component_format` in the `led_strip` config if red and green come out swapped. Don't drive GPIO8 low at reset (strapping pin).
@@ -245,7 +246,7 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
 - [x] Charge current: 500 mA (0x4D) chosen — safe for both 500/1000 mAh cells.
 - [ ] Low-battery behavior: ship mode (A) vs ESP32 deep sleep (B) — see 3.3.
 - [ ] Confirm 500 mAh cell datasheet allows 1C (500 mA) charge.
-- [ ] Battery divider ratio (to convert BAT_MEAS ADC → volts).
+- [x] Battery divider: 2 × 100 kΩ + 100 nF, ratio 1:2 → `ADC_ATTEN_DB_12`.
 - [x] RGB supply rail: 3.3 V, shared with the ESP32 — no level shifter needed.
 - [ ] RGB color byte order (RGB vs GRB) — verify once lit.
 - [ ] Active polarity of `SOIL_POWER`, `PAPER_POWER`, `CHARGE_EN`, `BAT_MEAS_EN`.

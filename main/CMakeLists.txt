@@ -1,3 +1,3 @@
-idf_component_register(SRCS "main.c"
-                       INCLUDE_DIRS "."
-                       REQUIRES rgb)
+idf_component_register(SRC_DIRS "." "app"
+                       INCLUDE_DIRS "." "app"
+                       REQUIRES rgb bq25186 eink)

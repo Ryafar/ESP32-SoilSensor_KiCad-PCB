@@ -44,7 +44,11 @@ idf.py menuconfig
 Settings that should hold for everybody belong in `sdkconfig.defaults`; the
 generated `sdkconfig` is not tracked in git.
 
-## Hardware
+## Documentation
 
-See [docs/hardware/](docs/hardware/) for the board description. The KiCad
-project lives outside this repository.
+* [docs/hardware/README.md](docs/hardware/README.md) — the board: blocks, pin
+  map, power strategy, charger configuration. Authority on anything electrical.
+* [docs/firmware-architecture.md](docs/firmware-architecture.md) — how the
+  firmware is cut into components, who owns which peripheral, build order.
+
+The KiCad project lives outside this repository.
