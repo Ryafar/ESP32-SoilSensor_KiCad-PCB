@@ -12,14 +12,30 @@ static const char *TAG = "bat_test";
 
 #define POLL_PERIOD_MS 2000
 
-/* A reading below this is "the divider is not connected" rather than "the cell
- * is flat" - a 1-cell LiPo that is alive cannot be under 2.0 V, so half of it
- * cannot be under 1.0 V at the ADC. */
-#define DIVIDER_PRESENT_THRESHOLD_MV 500
+/* A connected divider produces half the cell voltage, so the reading has to
+ * land in a window - a bare "is it above zero" test does not work, because a
+ * disconnected ADC input does not read zero. It floats, holding whatever charge
+ * is left on the 100 nF, and typically reads near full scale.
+ *
+ * Window: a 1-cell LiPo lives between roughly 2.4 V (deeply flat) and 4.4 V
+ * (above any charge voltage), so the ADC should see 1200-2200 mV. Anything
+ * above that is not a battery reading at all. */
+#define DIVIDER_READING_MIN_MV 1200
+#define DIVIDER_READING_MAX_MV 2200
 
 static adc_channel_t s_channel;
 static adc_cali_handle_t s_cali;
 static int s_enable_asserted_level = -1; // determined by the polarity probe
+
+/* pdMS_TO_TICKS truncates, so a settle time shorter than one tick would not
+ * delay at all - the same trap epd_bus.c guards against. Getting it wrong is
+ * invisible from the outside: the ADC still returns a number, it is just the
+ * node's previous voltage. */
+static void settle(void)
+{
+    const TickType_t ticks = pdMS_TO_TICKS(BATTERY_SETTLE_MS);
+    vTaskDelay(ticks == 0 ? 1 : ticks);
+}
 
 /* Averaged reading in millivolts at the ADC pin, i.e. before the divider is
  * undone. Returns -1 if the conversion failed. */
@@ -54,6 +70,11 @@ static int read_adc_mv(adc_oneshot_unit_handle_t adc)
     return average_raw * 3100 / 4095;
 }
 
+static bool plausible_battery_reading(int mv)
+{
+    return mv >= DIVIDER_READING_MIN_MV && mv <= DIVIDER_READING_MAX_MV;
+}
+
 /* Tries both enable levels and reports which one switches the divider in.
  * Returns the asserted level, or -1 if neither produced a signal. */
 static int probe_enable_polarity(const battery_test_config_t *config)
@@ -62,30 +83,38 @@ static int probe_enable_polarity(const battery_test_config_t *config)
 
     for (int level = 0; level <= 1; level++) {
         gpio_set_level(config->enable_gpio, level);
-        vTaskDelay(pdMS_TO_TICKS(BATTERY_SETTLE_MS + 20));
+        settle();
         mv_at[level] = read_adc_mv(config->adc);
         ESP_LOGI(TAG, "BAT_MEAS_EN=%d -> %d mV at the ADC", level, mv_at[level]);
     }
 
     gpio_set_level(config->enable_gpio, 0);
 
-    const bool low_reads = mv_at[0] > DIVIDER_PRESENT_THRESHOLD_MV;
-    const bool high_reads = mv_at[1] > DIVIDER_PRESENT_THRESHOLD_MV;
+    const bool low_plausible = plausible_battery_reading(mv_at[0]);
+    const bool high_plausible = plausible_battery_reading(mv_at[1]);
 
-    if (low_reads && high_reads) {
-        ESP_LOGE(TAG, "both levels read a voltage - the divider is never "
-                      "switched off. That is a permanent ~21 uA drain; check "
-                      "the BSS138 wiring");
-        /* Still usable for measuring, so carry on with the higher reading. */
+    for (int level = 0; level <= 1; level++) {
+        if (mv_at[level] > DIVIDER_READING_MAX_MV) {
+            ESP_LOGI(TAG, "BAT_MEAS_EN=%d: %d mV is too high to be half a cell "
+                          "- that is the ADC pin floating, i.e. the divider is "
+                          "disconnected", level, mv_at[level]);
+        }
+    }
+
+    if (low_plausible && high_plausible) {
+        ESP_LOGE(TAG, "both levels read a plausible cell voltage - the divider "
+                      "is never switched off. That is a permanent ~21 uA drain; "
+                      "check the BSS138 wiring");
         return mv_at[1] >= mv_at[0] ? 1 : 0;
     }
-    if (!low_reads && !high_reads) {
-        ESP_LOGE(TAG, "neither level reads a voltage - no cell attached, or "
-                      "BAT_MEAS/BAT_MEAS_EN are not the pins we think they are");
+    if (!low_plausible && !high_plausible) {
+        ESP_LOGE(TAG, "neither level reads a plausible cell voltage - no cell "
+                      "attached, or BAT_MEAS/BAT_MEAS_EN are not the pins we "
+                      "think they are");
         return -1;
     }
 
-    const int asserted = high_reads ? 1 : 0;
+    const int asserted = high_plausible ? 1 : 0;
     ESP_LOGI(TAG, "BAT_MEAS_EN asserted level is %d (%s-active)", asserted,
              asserted ? "high" : "low");
     if (asserted != BAT_MEAS_EN_ACTIVE_HIGH) {
@@ -164,12 +193,18 @@ void battery_test_task(void *arg)
 
         if (s_enable_asserted_level >= 0) {
             gpio_set_level(config->enable_gpio, s_enable_asserted_level);
-            vTaskDelay(pdMS_TO_TICKS(BATTERY_SETTLE_MS));
+            settle();
             const int adc_mv = read_adc_mv(config->adc);
             gpio_set_level(config->enable_gpio, !s_enable_asserted_level);
 
-            if (adc_mv >= 0) {
+            /* The same window the polarity probe uses. Without it a node that
+             * never got switched in is doubled into a confident-looking 7 V
+             * instead of being reported as the wiring or timing fault it is. */
+            if (adc_mv >= 0 && plausible_battery_reading(adc_mv)) {
                 battery_mv = (int)(adc_mv * config->divider_ratio);
+            } else if (adc_mv >= 0) {
+                ESP_LOGW(TAG, "%d mV at the ADC is outside the window for half a "
+                              "cell - the divider did not switch in", adc_mv);
             }
         }
 

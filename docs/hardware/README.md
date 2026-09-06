@@ -238,10 +238,30 @@ something else either has been configured already or is not healthy.
 | 0x0B | TS_CONTROL | 0x00 |
 | 0x0C | MASK_ID | 0x41 |
 
-The individual status bits in STAT0/STAT1 are still undecoded. The cheap way to
-decode them is to dump the same registers in known physical states — no cell,
-cell attached, actively charging, USB removed — and diff the results, rather
-than trusting a bit position read off a datasheet table.
+Decoded against §4.4, the two status bytes describe exactly the situation the
+dump was taken in: `STAT0 = 0x61` is `CHG_STAT = 2b11` (charge done or disabled)
+with `VIN_PGOOD = 1`, and `STAT1 = 0x40` is `BUVLO_STAT = 1` — battery
+undervoltage, which is what "no cell attached" looks like. Nothing here is a
+fault.
+
+**Four registers disagree with the datasheet, and the board is right.** For
+0x05, 0x06, 0x0A and 0x0C the datasheet's `[Reset = ...]` header line and its
+bit-field figure contradict its own field-description table; the measured value
+matches the field table every time:
+
+| Reg | Datasheet header | Measured | Which field disagrees |
+|---|---|---|---|
+| 0x05 | 0x24 | 0x20 | `VINDPM_1:0` — table says `2b00` (VBAT+300 mV), header/figure say `2b01` |
+| 0x06 | 0x56 | 0xD6 | `IBAT_OCP_1:0` — table says `2b11` (3000 mA), header/figure say `2b01` |
+| 0x0A | 0x42 | 0x40 | `WATCHDOG_15S_ENABLE` — table says `1b0`, header says set |
+| 0x0C | 0x40 | 0x41 | `Device_ID` — table says `4b0001`, figure says `4b0000` |
+
+So when bring-up says "compare against the datasheet reset values", it means the
+field-description tables, or better, this measured baseline. Comparing against
+the header lines flags four healthy registers as suspicious.
+
+`MASK_ID` low nibble = `0x1` is a usable identity check: an ACK at 0x6A only
+proves something is on the bus, the device ID proves it is a BQ25186.
 
 ### 4.2 Charge current for this project
 
@@ -265,6 +285,113 @@ The charger watchdog defaults to **160 s**, and on expiry it **resets all regist
 
 - **Recommended:** treat charger configuration as **stateless** — reconfigure the charger (0x04 = 0x4D, plus any other settings) on **every wake/boot**. Simple and robust for a deep-sleep device.
 - Optionally also **disable the watchdog** (0x07, WATCHDOG_SEL = 2b11) so it never resets your config.
+
+### 4.4 Status registers — every state the charger can report
+
+Datasheet §6.5.1.1–6.5.1.3. These three registers are the entire observable
+state of the charger. `STAT0` and `STAT1` are level ("what is true right now");
+`FLAG0` is latched ("what happened since you last looked"). All three are
+read-only to the host, but **`FLAG0` and the bottom three bits of `STAT1` clear
+on read** — see "Reading is not free" below.
+
+#### STAT0 (0x00) — charging state
+
+Every bit is type `R`, reset value undefined (it reflects hardware, not a default).
+
+Bits 6:5 are `CHG_STAT_1:0`, the four charging states:
+
+| `CHG_STAT` | State |
+|---|---|
+| `2b00` | Not charging, *while charging is enabled* — no valid input, or charging suspended |
+| `2b01` | Constant current — trickle, pre-charge **or** fast charge, not distinguished |
+| `2b10` | Constant voltage |
+| `2b11` | Charge done **or** charging disabled by the host |
+
+The remaining bits are independent condition flags, `1` = active:
+
+| Bit | Field | Meaning when set |
+|---|---|---|
+| 7 | `TS_OPEN_STAT` | TS/MR pin is open, **or** VBAT < V(BAT_HALT). Clamp is active |
+| 4 | `ILIM_ACTIVE_STAT` | Input current limit is clamping |
+| 3 | `VDPPM_ACTIVE_STAT` | DPPM active — the SYS load is taking current away from charging |
+| 2 | `VINDPM_ACTIVE_STAT` | VINDPM active — input sagging, charge current pulled back |
+| 1 | `THERMREG_ACTIVE_STAT` | Thermal regulation is reducing charge current |
+| 0 | `VIN_PGOOD_STAT` | VIN is good (above UVLO, above VBAT+V(SLEEP), below OVP) |
+
+Two ambiguities to know before writing a decoder:
+
+* `2b11` does not say whether the pack is full or whether *we* turned charging
+  off. Read `CHG_DIS` (`ICHG_CTRL` 0x04 bit 7) to separate the two.
+* `2b01` covers trickle, pre-charge and fast charge alike. If that distinction
+  matters it has to come from the battery voltage, not from this register.
+
+#### STAT1 (0x01) — input, battery and thermistor state
+
+| Bit | Field | Type | Meaning when set |
+|---|---|---|---|
+| 7 | `VIN_OVP_STAT` | R | Input overvoltage protection active |
+| 6 | `BUVLO_STAT` | R | Battery undervoltage lockout active — **also what an absent cell looks like** |
+| 5 | reserved | R | — |
+| 2 | `SAFETY_TMR_FAULT_FLAG` | RC | Safety timer expired. Only clears after CE is toggled |
+| 1 | `WAKE1_FLAG` | RC | TS/MR short press, Wake 1 duration met |
+| 0 | `WAKE2_FLAG` | RC | TS/MR press, Wake 2 duration met |
+
+Bits 4:3 are `TS_STAT_1:0`, the thermistor (JEITA) state — the four states are
+what TH1 buys us:
+
+| `TS_STAT` | State |
+|---|---|
+| `2b00` | Normal |
+| `2b01` | V(TS) < V(HOT) or V(TS) > V(COLD) — **charging suspended** |
+| `2b10` | Cool: V(COOL) < V(TS) < V(COLD) — charge *current* reduced per `TS_CONTROL` |
+| `2b11` | Warm: V(WARM) > V(TS) > V(HOT) — charge *voltage* reduced per `TS_CONTROL` |
+
+`TS_STAT` only means anything while `TS_EN` (`IC_CTRL` 0x07 bit 7) is set, which
+it is by default.
+
+#### FLAG0 (0x02) — latched events, every bit `RC`
+
+Set when the condition occurs, cleared by reading the register. This is the only
+place where a condition that came and went between two polls is visible.
+
+| Bit | Field | Latches |
+|---|---|---|
+| 7 | `TS_FAULT` | TS fault detected |
+| 6 | `ILIM_ACTIVE_FLAG` | Input current limit became active |
+| 5 | `VDPPM_ACTIVE_FLAG` | DPPM became active |
+| 4 | `VINDPM_ACTIVE_FLAG` | VINDPM became active |
+| 3 | `THERMREG_ACTIVE_FLAG` | Thermal regulation occurred |
+| 2 | `VIN_OVP_FAULT_FLAG` | Input overvoltage fault |
+| 1 | `BUVLO_FAULT_FLAG` | Battery undervoltage fault |
+| 0 | `BAT_OCP_FAULT` | Battery overcurrent fault |
+
+The datasheet calls bits 6:3 "faults". They are not faults, they are regulation
+loops doing their job — `VINDPM_ACTIVE_FLAG` on a weak USB supply is normal.
+Only bits 7, 2, 1, 0 are worth surfacing to a user.
+
+#### Reading is not free
+
+Two side effects, both easy to miss because the API is called *read*:
+
+1. **Any I²C transaction pets the watchdog.** With `WATCHDOG_SEL = 2b00`
+   (the reset value, see §4.3) the first transaction after power-on *starts* the
+   160 s timer, and every read afterwards restarts it. A firmware that polls
+   status faster than 160 s will never see the register reset that §4.3 warns
+   about — which also means polling cannot be used as evidence that the watchdog
+   is harmless.
+2. **`FLAG0` and `STAT1[2:0]` clear on read.** Whoever reads them first consumes
+   the event; a second reader sees zeros. There must be exactly one place in the
+   firmware that reads them, and it has to log or forward what it saw.
+
+#### Interrupts, for later
+
+`/INT` (GPIO20) pulses low for **128 µs** when an unmasked condition occurs —
+far too short to poll for. It needs an edge-triggered GPIO interrupt; the ISR
+then does nothing but notify the task that reads `FLAG0` (see
+[firmware-architecture.md](../firmware-architecture.md) §1). Masking lives in
+`CHARGECTRL1` (0x06) bits 2:0 and `MASK_ID` (0x0C) bits 7:4. On this board at
+reset that leaves PG, battery OCP/BUVLO, TS and VINDPM/DPPM able to interrupt,
+with charge-status, ILIM and thermal regulation masked.
 
 ---
 
@@ -361,6 +488,15 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
 - [ ] Low-battery behavior: ship mode (A) vs ESP32 deep sleep (B) — see 3.3.
 - [ ] Confirm 500 mAh cell datasheet allows 1C (500 mA) charge.
 - [x] Battery divider: 2 × 100 kΩ + 100 nF, ratio 1:2 → `ADC_ATTEN_DB_12`.
+- [ ] **Battery divider leaks into the 3.3 V rail when `BAT_MEAS_EN` is low.**
+  The BSS138 switches the *low* leg, so with the divider off GPIO0 is still tied
+  to VBAT through the top 100 kΩ and sits above the rail — bring-up measures
+  ~3.6 V there, i.e. GPIO0's ESD clamp to VDD is conducting. Running, that is
+  ~4–5 µA. In ship mode, with the 3.3 V rail collapsed, the same path is order
+  35 µA into a dead rail, well above the BQ25186's own ~1–2 µA ship-mode
+  current. Confirm against the schematic and measure; if real, the fix is a
+  switch in the *high* leg (or a series element) so the cell is fully isolated
+  from GPIO0.
 - [x] RGB supply rail: 3.3 V, shared with the ESP32 — no level shifter needed.
 - [ ] RGB color byte order (RGB vs GRB) — verify once lit.
 - [x] Active polarity: `SOIL_POWER` and `PAPER_POWER` are **active low** (P-FET gates to GND); `BAT_MEAS_EN` is **active high** with a pull-down.

@@ -72,7 +72,13 @@
  * exactly 2, so calibrating against a multimeter changes this one constant.
  * At 4.2 V the ADC sees 2.1 V, which fits ADC_ATTEN_DB_12. */
 #define BATTERY_DIVIDER_RATIO       2.0f
-#define BATTERY_SETTLE_MS           5       // let the 100 nF recharge after enabling
+/* With BAT_MEAS_EN low the BSS138 opens the divider's low leg, so the ADC node
+ * is pulled up to VBAT through the top 100k and sits there. Every reading
+ * therefore starts by discharging the 100 nF through 100k||100k: tau = 5 ms,
+ * and it takes about 5 tau to land within a millivolt of VBAT/2.
+ * Must also stay above one FreeRTOS tick (10 ms at CONFIG_FREERTOS_HZ=100) -
+ * pdMS_TO_TICKS truncates, and anything below a tick does not delay at all. */
+#define BATTERY_SETTLE_MS           30
 #define BATTERY_ADC_SAMPLES         16      // averaged per reading
 
 /* --- Battery thresholds -------------------------------------------------- */
