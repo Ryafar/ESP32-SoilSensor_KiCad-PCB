@@ -128,7 +128,7 @@ Two consequences worth carrying into the power budget:
 | Signal | GPIO | Notes |
 |---|---|---|
 | SOIL_MEAS | GPIO1 | ADC input (analog) |
-| SOIL_POWER | GPIO15 | probe rail load switch, **active low** — drive to GND to power the probe |
+| SOIL_POWER | GPIO14 | probe rail load switch, **active low** — drive to GND to power the probe |
 
 ### Battery monitoring — BQ25186 (I²C)
 | Signal | GPIO | Notes |
@@ -141,7 +141,7 @@ Two consequences worth carrying into the power budget:
 | BAT_MEAS | GPIO0 | ADC input, 1:2 divider (2 × 100 kΩ) with 100 nF to GND |
 | BAT_MEAS_EN | GPIO16 | battery divider enable (BSS138), **active high**, pull-down fitted — assert only when reading |
 
-> **ADC note:** `BAT_MEAS` (GPIO0) and `SOIL_MEAS` (GPIO1) are **two separate ADC channels**. The ESP32-C6 has a single SAR ADC, so the two are converted sequentially, not truly simultaneously — but firmware just reads one then the other, so both are effectively available without powering either down for the other. The real constraint is the enables: battery reads require `BAT_MEAS_EN` (GPIO16) asserted to switch in the divider, and soil reads require `SOIL_POWER` (GPIO15) to power the probe. Both are independent and could be on together, but for power saving, assert each only around its own measurement.
+> **ADC note:** `BAT_MEAS` (GPIO0) and `SOIL_MEAS` (GPIO1) are **two separate ADC channels**. The ESP32-C6 has a single SAR ADC, so the two are converted sequentially, not truly simultaneously — but firmware just reads one then the other, so both are effectively available without powering either down for the other. The real constraint is the enables: battery reads require `BAT_MEAS_EN` (GPIO16) asserted to switch in the divider, and soil reads require `SOIL_POWER` (GPIO14) to power the probe. Both are independent and could be on together, but for power saving, assert each only around its own measurement.
 
 ### RGB status LED
 | Signal | GPIO | Notes |
@@ -158,7 +158,7 @@ Two consequences worth carrying into the power budget:
 
 > **UART not used.** All console/logging goes over USB-Serial-JTAG (GPIO12/13). That frees GPIO16 to serve as `BAT_MEAS_EN` with no conflict.
 
-> **Strapping caution:** GPIO8 (RGB) and GPIO9 (BOOT) are strapping pins. GPIO8 must not be held low at reset. GPIO15 is strapping-adjacent on some C6 variants — check levels at boot for your load switches so the board always boots in SPI-flash mode.
+> **Strapping caution:** GPIO8 (RGB) and GPIO9 (BOOT) are strapping pins. GPIO8 must not be held low at reset. An earlier revision of this document put `SOIL_POWER` on GPIO15 and warned about it for that reason; the schematic says **GPIO14**, and GPIO15 now carries no signal at all.
 
 ---
 
@@ -441,7 +441,7 @@ A top-level **state machine** driven by power state, with helper modules underne
 1. (Already configured charger at boot.)
 2. `charger`: read BQ25186 status over I²C (charging? fault? POWER_GOOD?).
 3. `battery`: assert `BAT_MEAS_EN` (GPIO16), read GPIO0 ADC, compute voltage, deassert. **If < 3.3 V and no USB → go to LOW-BATT.**
-4. `soil`: assert `SOIL_POWER` (GPIO15), settle (~tens of ms), read GPIO1 ADC, average, deassert.
+4. `soil`: assert `SOIL_POWER` (GPIO14), settle (see `SOIL_SETTLE_MS`; measured by `soil_test_task`, not guessed), read GPIO1 ADC, average, deassert.
 5. `display`: refresh e-ink with soil % + battery + charge state (full refresh only when needed to reduce ghosting).
 6. `rgb`: brief status blink (skip on low battery to save power).
 7. `power`: compute next interval, enter deep sleep.

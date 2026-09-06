@@ -27,10 +27,19 @@
 
 /* --- Soil probe (CON2) --------------------------------------------------- */
 #define PIN_SOIL_MEAS       1   // ADC input
-#define PIN_SOIL_POWER     15   // load switch, power the probe only while sampling
+#define PIN_SOIL_POWER     14   // load switch, power the probe only while sampling
 
 /* Same AO3401A P-FET arrangement as the display rail. */
 #define SOIL_POWER_ACTIVE_LOW 1
+
+/* Time between switching the probe rail on and the first conversion. The
+ * hardware document only ever guessed at "tens of ms"; soil_test_task samples a
+ * ramp after power-up and logs where the output actually flattens, so this is
+ * the number to correct once that ramp has been read off a real probe.
+ * Must stay above one FreeRTOS tick (10 ms at CONFIG_FREERTOS_HZ=100) -
+ * pdMS_TO_TICKS truncates anything shorter to no delay at all. */
+#define SOIL_SETTLE_MS              100
+#define SOIL_ADC_SAMPLES            16      // averaged per reading
 
 /* --- Battery / charger BQ25186 ------------------------------------------- */
 #define PIN_I2C_SDA        18
@@ -87,5 +96,5 @@
 #define BATTERY_SHIP_MODE_MV        3300
 
 /* --- Timing -------------------------------------------------------------- */
-#define SOIL_PROBE_SETTLE_MS        50      // after asserting SOIL_POWER
+/* The soil probe's settle time lives with the other soil constants above. */
 #define MEASUREMENT_INTERVAL_S      (30 * 60)
