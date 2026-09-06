@@ -21,7 +21,7 @@ Three layers, and the dependency arrows only ever point downwards:
                   owns the shared buses, knows every pin
         |
         v
-   components/    drivers: rgb, charger, battery, soil, display, power
+   components/    drivers: rgb, charger, battery, soil, eink, power
                   board-agnostic, no knowledge of pins or of each other
         |
         v
@@ -46,13 +46,23 @@ holding `app_main()`. Inside it:
 main/
   main.c        app_main: create shared resources, init drivers, start tasks
   config.h      pin map, thresholds, divider factor
-  app/          what the tasks do: state machine, board glue, bring-up tasks
+  bringup/      hardware checks: does this board work at all
+  app/          the real firmware: state machine, board glue  (not written yet)
 ```
+
+The split between `bringup/` and `app/` is deliberate. Bring-up code answers
+"is the hardware sound", exists to be read by a human watching a serial log,
+and gets deleted or disabled once its question is answered. Application code
+answers "what should the device do" and has to survive. Mixing the two means
+the throwaway half never gets thrown away.
+
+Not called `test/`, because in ESP-IDF that name belongs to Unity unit tests,
+and next to `app/` it would read as "the tests for app/" — which these are not.
 
 `main.c` stays short by design — it is the only place that decides stack sizes
 and priorities, and that is easier to review when it is the only thing there.
-The `app/` sources are picked up through `SRC_DIRS "." "app"`; a newly added
-file needs an `idf.py reconfigure` before the glob sees it.
+Sources are picked up through `SRC_DIRS`; a newly added file needs an
+`idf.py reconfigure` before the glob sees it.
 
 ### The rule that makes it work
 
@@ -84,7 +94,7 @@ Two reasons, and the second one is the one that bites on this board:
 Consequences:
 
 * **Driver calls are synchronous.** `soil_read_percent()` blocks its caller for
-  the settling time; `display_render()` blocks while polling BUSY. That is
+  the settling time; `eink_render()` blocks while polling BUSY. That is
   intended — the caller chose to wait, so the caller can also choose to do it
   from a task that may block.
 * **One task per driver.** Drivers are not thread-safe unless their header says
@@ -122,7 +132,7 @@ helpers and ADC setup. In practice that layer dissolves into three places:
 | `bsp/` responsibility | Where it actually lives | Why |
 |---|---|---|
 | Pin definitions (`board.h`) | `main/config.h` | Keeps drivers board-agnostic. A `board.h` inside `components/` would let any driver reach for GPIO8 directly, and the layering is gone. |
-| Rail / power-switch helpers | Inside the driver that owns the rail | `soil/` owns `SOIL_POWER`, `display/` owns `PAPER_POWER`, `battery/` owns `BAT_MEAS_EN`. Each can then guarantee its rail is off when its function returns — a promise no external helper can make. |
+| Rail / power-switch helpers | Inside the driver that owns the rail | `soil/` owns `SOIL_POWER`, `eink/` owns `PAPER_POWER`, `battery/` owns `BAT_MEAS_EN`. Each can then guarantee its rail is off when its function returns — a promise no external helper can make. |
 | ADC channel setup | `main`, handed to drivers as a handle | See below. |
 
 So there is no `bsp/` component. Nothing is lost; the responsibilities just sit
@@ -212,19 +222,71 @@ Same discipline as `battery/`: power the probe, settle ~50 ms, average, power
 down. The dry/wet calibration points are empirical and belong in `config.h` once
 measured.
 
-### `display/` — e-ink
+### `eink/` — e-ink
 
 SPI write-only, plus BUSY / RST / DC and the `PAPER_POWER` rail.
 
 ```c
-esp_err_t display_init(const display_config_t *config);
-esp_err_t display_render(const display_data_t *data);   // soil %, battery, charge state
-esp_err_t display_power_off(void);
+esp_err_t eink_init(const eink_config_t *config);
+esp_err_t eink_render(const eink_screen_t *screen);      // soil %, battery, charge state
+esp_err_t eink_render_full(const eink_screen_t *screen); // forces the full waveform
+esp_err_t eink_power_off(void);
 ```
 
-Blocked on an open hardware item: the panel's controller IC is not identified
-yet, and that choice decides whether an existing driver fits or one has to be
-written. Scheduled last for that reason.
+One component, but the panel is the one piece of hardware that is not fixed, so
+inside it the display splits into files rather than into a monolith:
+
+| File | Job | Header |
+|---|---|---|
+| `eink.c` | Framebuffer, screen layout, refresh policy | `include/eink.h` — **public** |
+| `eink_canvas.c` | Drawing primitives and the pixel packing | `priv_include/` |
+| `epd_bus.c` | SPI, D/C, RST, BUSY and the rail. The half both controllers share | `priv_include/` |
+| `ssd1681.c` | Black/white controller. Packed 1 bpp, full and partial refresh | `priv_include/` |
+| `jd79660.c` | Four-colour controller. Packed 2 bpp, one refresh mode | `priv_include/` |
+
+The controller files are named after their chips for the same reason the charger
+driver is `bq25186` rather than `charger`: the name says which datasheet the
+register writes came from. `eink.c` is the panel-agnostic half and holds no
+controller registers at all.
+
+These were four separate components at first, and that was a mistake worth
+recording. A component is a unit of *dependency and reuse*, not of file
+organisation — nothing outside `eink/` ever includes `ssd1681.h`, so the extra
+boundaries cost three `CMakeLists.txt` and bought nothing. Collapsing them also
+fixed two real things: `PRIV_INCLUDE_DIRS` makes `eink.h` the only reachable
+header, so `main` can no longer bypass the component and drive the controller
+directly, and the unused controller stopped being compiled at all (see below).
+
+Which controller is compiled in is a **build-time** choice (`menuconfig` →
+*E-ink display*), because it sets the framebuffer depth — 1 bpp for the
+black/white panel, 2 bpp for the four-colour one. Making it a runtime choice
+would mean carrying both, and the drawing code would have to branch per pixel.
+As it stands the drawing code is written once against a colour enum, and the
+packing is the only thing that differs.
+
+The selection is an `if(CONFIG_EINK_PANEL_JD79660)` around `SRCS` in the
+component's `CMakeLists.txt`, so the other controller is never handed to the
+compiler. Worth knowing why that works on `SRCS` and not on `REQUIRES`: a
+component's `CMakeLists.txt` is evaluated twice, and in the first
+(early-expansion) pass — the one that resolves requirements — `CONFIG_` values
+do not exist yet. A conditional `REQUIRES` therefore takes the wrong branch
+silently. `SRCS` is read in the second pass, where the config is available.
+
+`epd_bus.c` earns its place under the rule above — it is not a wrapper, it is
+the thing that lets the two controller drivers contain only their own command
+sequences. It also owns two non-obvious invariants:
+
+* `epd_bus_power_off()` frees the SPI bus and drives every line low *before*
+  opening the load switch. An idle SPI peripheral holding its pins high
+  back-feeds the panel through its ESD diodes and the rail never reaches 0 V.
+* CS is a plain GPIO, not the SPI peripheral's hardware CS, because a frame is
+  5–10 kB and gets chunked on the way out — hardware CS would deassert between
+  chunks in the middle of a RAM write.
+
+There is no font. Everything on this screen is a number, a bar or an icon, so
+the digits are drawn as seven segments from rectangles: a few hundred bytes of
+code instead of a few kilobytes of glyph bitmaps, and more legible at the size
+a 200×200 panel needs.
 
 ### `power/` — sleep and wake
 
@@ -247,7 +309,7 @@ dependency graph stays a tree.
                owns i2c bus + adc unit)
         ______________|_______________
        /       /      |      \        \
-     rgb   charger  battery  soil   display   power
+     rgb   charger  battery  soil    eink     power
        \       \      |      /        /        /
         \_______\_____|_____/________/________/
                       |
@@ -338,7 +400,7 @@ and so that unresolved hardware questions block as little as possible.
 | 4 | `battery/` | Needs the divider ratio measured on hardware |
 | 5 | `soil/` | Needs dry/wet calibration points measured on hardware |
 | 6 | `power/` + state machine | First full cycle: wake, measure, sleep. Measure the actual sleep current here |
-| 7 | `display/` | Last: blocked on identifying the panel controller |
+| 7 | `eink/` | Bring-up needs the panel in hand: check orientation, ghosting after partial refreshes, and that the image survives `eink_power_off()` |
 
 ---
 
@@ -358,4 +420,3 @@ Carried from the hardware README §9, listed here because each one changes code:
   `BAT_MEAS_EN`** — they drive P-FETs, so asserted may well mean driving low.
   Getting this wrong means a rail that is never off, which is a battery-life
   bug rather than a visible one.
-- **E-ink controller IC** — decides the whole `display/` approach.

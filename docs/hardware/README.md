@@ -2,7 +2,18 @@
 
 Battery-powered soil-moisture sensor built on the **ESP32-C6-FH4**, with an e-ink display, an addressable RGB status LED, a BQ25186 Li-ion charger (I²C), and a capacitive soil probe. Firmware targets **ESP-IDF + FreeRTOS**.
 
-Hardware: KiCad project *Soil Sensor*, Rev 0.1.0 (Robin Bühler).
+Hardware: KiCad project *Soil Sensor*, Rev 0.1.0 (Robin Bühler), dated
+31.07.2026.
+
+| | |
+|---|---|
+| Schematic | [Schematic_v0.1.0.pdf](Schematic_v0.1.0.pdf) |
+| Board, top | [3D/TOP_3D.png](3D/TOP_3D.png) |
+| Board, bottom | [3D/BOT_3D.png](3D/BOT_3D.png) |
+| Board, angled | [3D/Side_3D.png](3D/Side_3D.png) |
+
+The schematic is the authority. Where this document and the PDF disagree, the
+PDF is right and this file needs fixing.
 
 **Design principle:** power state is the top-level state machine. Every wake begins by checking the battery; measurement, display, and status LED only run when there is enough energy. When the battery is low, the device commands the charger into ship mode and powers itself off until USB is reconnected.
 
@@ -12,17 +23,63 @@ Hardware: KiCad project *Soil Sensor*, Rev 0.1.0 (Robin Bühler).
 
 | Block | Part | Interface to MCU |
 |---|---|---|
-| MCU | ESP32-C6-FH4 (U3) | — |
+| MCU | ESP32-C6-FH4 (U3), chip-down QFN with on-board antenna | — |
 | Battery charger / power-path | BQ25186 (U5) | I²C (0x6A) + INT + CHARGE_EN + POWER_GOOD |
 | 3.3 V rail | XC6220B331MR LDO (U7), fed from charger SYS | — |
 | E-ink display | 8-pin FPC (CON1) | SPI (4-wire) + BUSY/RST/DC + power switch |
 | RGB status LED | Würth WL-ICLED 1312020030000 (U2) | 1-wire (RMT), WS2812-compatible, runs on the 3.3 V rail |
-| Soil probe | 4-pin JST (CON2, S3B-PH-SM4) | ADC + power switch |
-| Battery voltage sense | divider + BSS138 switch | ADC + enable |
-| Buttons | BOOT (SW2), RESET | GPIO9 / EN |
+| Soil probe | JST PH, CON2, bottom side (S3B-PH-SM4 — see note below) | ADC + power switch |
+| Battery voltage sense | 2 × 100 kΩ divider + BSS138 switch | ADC + enable |
+| Charger thermistor | TH1, bottom side | none — wired to the charger's TS pin |
+| Buttons | RESET, BOOT (GPIO9), and SW3 | see §1.2 |
 | Battery | 1-cell LiPo, 500 mAh or 1000 mAh | — |
 
+> **CON2 pin count.** The part number `S3B-PH-SM4` is a **3-circuit** JST PH
+> connector, and the bottom-side render shows three contacts. Earlier revisions
+> of this document called it 4-pin. If the probe really needs four wires, the
+> part number is wrong; if three is right, the probe is powered by
+> `SOIL_POWER` switching its supply rather than by a dedicated enable line.
+> **Check the schematic and correct whichever half is wrong.**
+
 Two soft power switches (AO3401A P-FETs) gate the e-ink rail and the soil-probe rail so both can be fully powered down between measurements — important for battery life.
+
+### 1.1 Where things sit
+
+Read off the 3D renders. Everything is on the top side except where noted.
+
+| Ref | What | Where |
+|---|---|---|
+| U3 | ESP32-C6-FH4, QFN | centre |
+| U5 | BQ25186 charger | right edge, below the buttons |
+| U7 | XC6220B331MR LDO, SOT-23-5 | left edge |
+| U2 | WL-ICLED RGB status LED | bottom edge, beside SW3 |
+| L5 | chip antenna, in a ground keep-out | top-left corner |
+| L1–L4 | RF matching network | around U3 and the antenna |
+| CON1 | e-ink FPC | top edge |
+| CON2 | soil probe connector | **bottom side** |
+| TH1 | thermistor | **bottom side**, centre |
+| USB-C | power and USB-Serial-JTAG | bottom edge |
+
+The MCU is a bare chip with an on-board antenna, not a shielded module. That
+matters for anything that touches the RF path — keep-out areas, enclosure
+material and how the board is mounted in the pot all affect range, and none of
+it is adjustable in firmware.
+
+### 1.2 Three buttons, not two
+
+The renders show three switches, silkscreened `R`, `B` and `SW3`:
+
+| Button | Function |
+|---|---|
+| `R` | RESET, straight to the MCU's EN pin |
+| `B` | BOOT, GPIO9 — hold low at reset for download mode |
+| `SW3` | **presumed** the charger's TS/MR button |
+
+`SW3` matters more than its designator suggests. §3.2 says ship mode wakes on
+"valid VIN **or** TS/MR button long-press" — so if `SW3` is that button, it is
+the only way to bring the board back from ship mode without plugging in USB,
+and the low-battery design should say so. **Confirm against the schematic**:
+does `SW3` go to the BQ25186's TS/MR pin, or somewhere else?
 
 ---
 
@@ -39,24 +96,50 @@ Read directly from the schematic. **Verify against your own board before flashin
 | CS   | GPIO5 | output |
 | CLK  | GPIO6 | SPI SCLK |
 | SDO (MOSI) | GPIO7 | SPI MOSI (display is write-only) |
-| PAPER_POWER | GPIO23 | HIGH-side load switch enable for the display rail |
+| PAPER_POWER | GPIO23 | display rail load switch, **active low** — drive to GND to power the panel |
+
+**Panel:** WeAct Studio 1.54" e-paper module, 8-pin FPC. Two variants exist and
+the firmware supports both, selected in `menuconfig` → *E-ink display*:
+
+| Variant | Panel | Controller | Resolution | Refresh |
+|---|---|---|---|---|
+| Black/white (**fitted**) | GDEH0154D67 | SSD1681 | 200×200, 1 bpp | ~2.5 s full, ~0.5 s partial |
+| Four colour | GDEM0154F51H | JD79660 | 200×200, 2 bpp | ~21 s, no partial mode |
+
+Sources: [WeActStudio.EpaperModule](https://github.com/WeActStudio/WeActStudio.EpaperModule)
+(vendor reference code under `Doc/1.54 Inch Black&Write/`, controller names in
+`Example/EpaperModuleTest_Arduino_ESP32/`) and GxEPD2's `GxEPD2_154_D67` /
+`GxEPD2_154c_GDEM0154F51H`.
+
+Two consequences worth carrying into the power budget:
+
+- The module's 3/4-wire select (`BS`) is tied on the module PCB, so CON1 needs
+  no extra line and the interface is 4-wire SPI as assumed.
+- Both controllers sit at ~1 µA in deep sleep and e-paper holds its image with
+  no power at all, so `PAPER_POWER` is insurance rather than a necessity. When
+  it is cut, every SPI and control line must be driven low first — otherwise
+  the ESP32 back-feeds the module through its ESD diodes and the rail never
+  actually reaches 0 V. `epd_bus_power_off()` does this.
+- A four-colour refresh takes ~21 s **per wake**. At the 30-minute measurement
+  interval that is a different energy budget from the 2.5 s black/white panel,
+  and it is the reason the panel choice is a build-time decision.
 
 ### Soil probe (CON2)
 | Signal | GPIO | Notes |
 |---|---|---|
 | SOIL_MEAS | GPIO1 | ADC input (analog) |
-| SOIL_POWER | GPIO15 | load switch enable — power the probe only while sampling |
+| SOIL_POWER | GPIO15 | probe rail load switch, **active low** — drive to GND to power the probe |
 
 ### Battery monitoring — BQ25186 (I²C)
 | Signal | GPIO | Notes |
 |---|---|---|
-| SDA | GPIO18 | I²C data |
-| SCL | GPIO19 | I²C clock |
-| INT | GPIO20 | charger interrupt (input, active-low) |
-| CHARGE_EN | GPIO21 | charge enable output |
-| POWER_GOOD | GPIO22 | input from charger |
+| SDA | GPIO18 | I²C data, 10 kΩ pull-up fitted |
+| SCL | GPIO19 | I²C clock, 10 kΩ pull-up fitted |
+| INT | GPIO20 | charger interrupt, input, active low, 10 kΩ pull-up fitted |
+| CHARGE_EN | GPIO21 | charge enable output, 10 kΩ pull-up fitted |
+| POWER_GOOD | GPIO22 | input from charger, 10 kΩ pull-up fitted |
 | BAT_MEAS | GPIO0 | ADC input, 1:2 divider (2 × 100 kΩ) with 100 nF to GND |
-| BAT_MEAS_EN | GPIO16 | enables the battery divider (BSS138) — assert only when reading |
+| BAT_MEAS_EN | GPIO16 | battery divider enable (BSS138), **active high**, pull-down fitted — assert only when reading |
 
 > **ADC note:** `BAT_MEAS` (GPIO0) and `SOIL_MEAS` (GPIO1) are **two separate ADC channels**. The ESP32-C6 has a single SAR ADC, so the two are converted sequentially, not truly simultaneously — but firmware just reads one then the other, so both are effectively available without powering either down for the other. The real constraint is the enables: battery reads require `BAT_MEAS_EN` (GPIO16) asserted to switch in the divider, and soil reads require `SOIL_POWER` (GPIO15) to power the probe. Both are independent and could be on together, but for power saving, assert each only around its own measurement.
 
@@ -68,7 +151,9 @@ Read directly from the schematic. **Verify against your own board before flashin
 ### System / boot
 | Signal | GPIO | Notes |
 |---|---|---|
-| BOOT button | GPIO9 | strapping pin: LOW at reset → download mode |
+| BOOT button (`B`) | GPIO9 | strapping pin: LOW at reset → download mode |
+| RESET button (`R`) | — | wired to EN, not visible to firmware |
+| `SW3` | — | presumed charger TS/MR, see §1.2 — not an MCU pin |
 | USB D- / D+ | GPIO12 / GPIO13 | native USB-Serial-JTAG — the only console/log interface for this project |
 
 > **UART not used.** All console/logging goes over USB-Serial-JTAG (GPIO12/13). That frees GPIO16 to serve as `BAT_MEAS_EN` with no conflict.
@@ -130,6 +215,33 @@ The chip boots with these values **before** the ESP32 writes anything:
 | Watchdog | 0x07 = 0x84 | **160 s, resets regs to default** | ⚠️ see 4.3 |
 | Thermal regulation | 0x05 | 100 °C | |
 | Discharge OCP | 0x06 | 3000 mA | |
+
+### 4.1a Measured power-on values
+
+Read off a known-good board over I²C at boot, USB connected, no cell attached,
+before firmware writes anything. Useful as a baseline: a board that dumps
+something else either has been configured already or is not healthy.
+
+| Reg | Name | Value |
+|---|---|---|
+| 0x00 | STAT0 | 0x61 |
+| 0x01 | STAT1 | 0x40 |
+| 0x02 | FLAG0 | 0x00 |
+| 0x03 | VBAT_CTRL | **0x46** — matches the documented 4.2 V reset |
+| 0x04 | ICHG_CTRL | **0x05** — 10 mA, i.e. never configured |
+| 0x05 | CHARGECTRL0 | 0x20 |
+| 0x06 | CHARGECTRL1 | 0xD6 |
+| 0x07 | IC_CTRL | **0x84** — confirms the watchdog register and its reset value |
+| 0x08 | TMR_ILIM | 0x4D |
+| 0x09 | SHIP_RST | 0x11 — EN_RST_SHIP bits [6:5] are 00, "do nothing" |
+| 0x0A | SYS_REG | 0x40 |
+| 0x0B | TS_CONTROL | 0x00 |
+| 0x0C | MASK_ID | 0x41 |
+
+The individual status bits in STAT0/STAT1 are still undecoded. The cheap way to
+decode them is to dump the same registers in known physical states — no cell,
+cell attached, actively charging, USB removed — and diff the results, rather
+than trusting a bit position read off a datasheet table.
 
 ### 4.2 Charge current for this project
 
@@ -216,9 +328,11 @@ Keep both load switches OFF and the RGB dark during sleep.
 - **ADC:** ESP-IDF `adc_oneshot` + `adc_cali`. Sample after the rail settles; average several reads. Establish soil dry/wet calibration points empirically.
 - **Battery divider:** 2 × 100 kΩ, so `VBAT = 2 × ADC`. At a full 4.2 V cell the ADC sees 2.1 V, which fits `ADC_ATTEN_DB_12` (usable to ~2.9 V) with headroom. The 100 nF to GND buffers the ADC's sample-and-hold charge injection, so the 100 kΩ source impedance is not a problem — but the cap needs time to recharge after `BAT_MEAS_EN` is asserted, so settle before the first conversion and discard it. The exact factor is a constant in `main/config.h`, not a literal `* 2`: resistor tolerance means the real ratio is not exactly 2, and calibrating against a multimeter should touch one number.
 - **I²C:** new `i2c_master` driver. BQ25186 at 0x6A. Configure ICHG = 0x4D on every boot (watchdog note in 4.3). Watch TS/thermistor limits (schematic sets 0 °C cold / 60 °C hot).
+- **I²C pull-ups:** 10 kΩ on both lines, on the board. Comfortable at 100 kHz; on the weak side for 400 kHz, where the rise time starts to depend on how much capacitance the traces add. Bring up at 100 kHz and only raise the clock once the bus is proven. The ESP32's internal pull-ups (~45 kΩ) may stay enabled — in parallel they help rather than hurt — but the board does not depend on them.
 - **SPI e-ink:** write-only; wait on BUSY between commands. Prefer partial refresh; full refresh periodically to clear ghosting.
 - **RGB:** ESP-IDF `led_strip` (RMT backend), wrapped by `components/rgb/`. The WL-ICLED 1312020030000 is listed by Würth as *single wire, 24 bit* and uses the standard WS2812 protocol, so it's a drop-in for the old SK6812 in software. It runs on the **same 3.3 V rail as the ESP32**, so GPIO8's logic level needs no shifter — ignore the 5 V / 5.5 V figures some distributor listings quote. Remaining unknown: byte order may be **RGB** instead of the WS2812-default **GRB**; set `color_component_format` in the `led_strip` config if red and green come out swapped. Don't drive GPIO8 low at reset (strapping pin).
-- **Power switches:** AO3401A are P-FETs — confirm active polarity of `SOIL_POWER` / `PAPER_POWER` on the board (GPIO level ↔ rail on/off mapping).
+- **Power switches:** AO3401A are P-FETs, so both rails are **active low** — `SOIL_POWER` and `PAPER_POWER` conduct when the GPIO is driven to GND. Note what that means at reset: an ESP32 GPIO comes up as a floating input, so neither rail is held off by the MCU until firmware configures the pin. Drive both high (off) as the first thing after boot, before anything else claims the pins.
+- **Pull-ups and pull-downs on the charger pins:** `INT`, `POWER_GOOD` and `CHARGE_EN` each carry a 10 kΩ pull-up, so the ESP32's internal pull-ups are not needed on any of them. `BAT_MEAS_EN` has a pull-down instead, which is the right default: the divider stays disconnected until firmware actively asks for a reading, including while the MCU is asleep or in reset.
 - **Ship mode sequencing:** the I²C write that enters ship mode is the last thing the ESP32 does — nothing executes after it (see 3.2).
 - **Console:** UART unused; route all logging over **USB-Serial-JTAG** (GPIO12/13). Set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` in menuconfig.
 - **Deep sleep:** disable unused peripherals; only RTC timer stays up. Target the wake interval to your battery budget.
@@ -249,6 +363,11 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
 - [x] Battery divider: 2 × 100 kΩ + 100 nF, ratio 1:2 → `ADC_ATTEN_DB_12`.
 - [x] RGB supply rail: 3.3 V, shared with the ESP32 — no level shifter needed.
 - [ ] RGB color byte order (RGB vs GRB) — verify once lit.
-- [ ] Active polarity of `SOIL_POWER`, `PAPER_POWER`, `CHARGE_EN`, `BAT_MEAS_EN`.
-- [ ] Exact e-ink controller (panel driver IC) → picks the display driver/lib.
+- [x] Active polarity: `SOIL_POWER` and `PAPER_POWER` are **active low** (P-FET gates to GND); `BAT_MEAS_EN` is **active high** with a pull-down.
+- [x] Charger pin biasing: 10 kΩ pull-ups on `INT`, `POWER_GOOD`, `CHARGE_EN`; pull-down on `BAT_MEAS_EN`.
+- [x] Exact e-ink controller: **SSD1681** (WeAct 1.54" B/W module, panel GDEH0154D67, 200×200). The 4-colour variant of the same module (GDEM0154F51H) is **JD79660** — both drivers exist, see §2 "E-ink display".
 - [ ] Soil probe output range (for calibration).
+- [ ] CON2: three contacts or four? The part number says three, the text said four (§1).
+- [ ] `SW3`: is it the charger's TS/MR wake button? Decides whether ship mode can be exited without USB.
+- [ ] Identify `U1`, `U4`, `U6` and `LED1` from the schematic — visible on the renders, not described here. `U6` sits on the bottom side and looks like a connector; if that is the battery JST it belongs in the §1 table.
+- [ ] The four ringed pads on the bottom side: test points, and for what?

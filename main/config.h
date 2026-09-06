@@ -16,18 +16,36 @@
 #define PIN_EPD_MOSI        7   // SPI MOSI, display is write-only
 #define PIN_EPD_POWER      23   // load switch for the display rail (AO3401A)
 
+/* SPI2 is the only general-purpose SPI host on the C6, and the display is the
+ * only device on it. Expanded at the point of use, so config.h stays free of
+ * ESP-IDF headers. */
+#define EPD_SPI_HOST        SPI2_HOST
+
+/* AO3401A is a P-FET high-side switch: the gate goes to GND to conduct.
+ * Confirmed against the schematic. */
+#define EPD_POWER_ACTIVE_LOW 1
+
 /* --- Soil probe (CON2) --------------------------------------------------- */
 #define PIN_SOIL_MEAS       1   // ADC input
 #define PIN_SOIL_POWER     15   // load switch, power the probe only while sampling
 
+/* Same AO3401A P-FET arrangement as the display rail. */
+#define SOIL_POWER_ACTIVE_LOW 1
+
 /* --- Battery / charger BQ25186 ------------------------------------------- */
 #define PIN_I2C_SDA        18
 #define PIN_I2C_SCL        19
-#define PIN_CHARGER_INT    20   // input, active low
-#define PIN_CHARGE_EN      21   // output
-#define PIN_POWER_GOOD     22   // input
+#define PIN_CHARGER_INT    20   // input, active low, 10k pull-up on the board
+#define PIN_CHARGE_EN      21   // output, 10k pull-up on the board
+#define PIN_POWER_GOOD     22   // input, 10k pull-up on the board
 #define PIN_BAT_MEAS        0   // ADC input, behind the divider
 #define PIN_BAT_MEAS_EN    16   // BSS138, assert only while reading
+
+/* The charger pins carry 10 kOhm pull-ups, so the ESP32's internal ones are
+ * redundant on INT, CHARGE_EN and POWER_GOOD. BAT_MEAS_EN has a pull-down
+ * instead: the divider stays disconnected while the MCU sleeps or is in reset,
+ * and only a driven high connects it. */
+#define BAT_MEAS_EN_ACTIVE_HIGH 1
 
 /* --- RGB status LED ------------------------------------------------------ */
 /* Wuerth WL-ICLED 1312020030000, WS2812-compatible single-wire protocol.
@@ -38,7 +56,7 @@
 #define PIN_BOOT_BUTTON     9   // strapping pin, low at reset -> download mode
 
 /* --- I2C ----------------------------------------------------------------- */
-#define I2C_CLK_HZ          400000
+#define I2C_CLK_HZ          100000  // 100 kHz while bringing the bus up
 #define BQ25186_I2C_ADDR    0x6A
 
 /* --- Charger configuration ----------------------------------------------- */

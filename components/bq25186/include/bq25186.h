@@ -21,9 +21,10 @@ extern "C" {
 
 #define BQ25186_I2C_ADDR_DEFAULT 0x6A
 
-/* Register map. Addresses are from the datasheet's register summary; the bit
- * level detail below is only spelled out where it has been cross-checked - see
- * the note on the watchdog in bq25186_configure_charging(). */
+/* Register map. Addresses are from the datasheet's register summary. The reset
+ * values of 0x03, 0x04, 0x07 and 0x09 have been confirmed against a real board
+ * (see docs/hardware/README.md §4.1a); the individual status bits in STAT0 and
+ * STAT1 have not, which is why bq25186_read_status() hands back raw bytes. */
 #define BQ25186_REG_STAT0        0x00 // charging state
 #define BQ25186_REG_STAT1        0x01 // input/battery/temperature state
 #define BQ25186_REG_FLAG0        0x02 // latched fault flags, cleared on read

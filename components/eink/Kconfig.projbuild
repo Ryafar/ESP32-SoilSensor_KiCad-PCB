@@ -1,0 +1,46 @@
+menu "E-ink display"
+
+    choice EINK_PANEL
+        prompt "Panel and controller"
+        default EINK_PANEL_SSD1681
+        help
+            Which of the two WeAct Studio 1.54" modules is fitted to CON1. The
+            choice decides which controller driver is used and how many bits
+            per pixel the framebuffer carries, so it is a build-time setting,
+            not a runtime one.
+
+        config EINK_PANEL_SSD1681
+            bool "1.54\" black/white - GDEH0154D67, SSD1681"
+
+        config EINK_PANEL_JD79660
+            bool "1.54\" four colour - GDEM0154F51H, JD79660"
+    endchoice
+
+    config EINK_SPI_CLOCK_HZ
+        int "SPI clock (Hz)"
+        default 10000000
+        range 1000000 20000000
+        help
+            10 MHz is what both vendor drivers use. Lower it if the FPC run to
+            CON1 turns out to be marginal.
+
+    config EINK_FULL_REFRESH_INTERVAL
+        int "Partial refreshes between full refreshes"
+        default 12
+        range 0 100
+        help
+            Partial refreshes are fast and quiet but leave ghosting behind. A
+            full refresh clears it and costs a visible flash plus several
+            seconds. 0 forces every refresh to be a full one. Ignored on the
+            four-colour panel, which has no partial mode.
+
+    config JD79660_FAST_MODE
+        bool "Four-colour panel: use the fast refresh waveform"
+        depends on EINK_PANEL_JD79660
+        default y
+        help
+            Cuts a full four-colour refresh from roughly 30 s to roughly 21 s,
+            at the cost of the low end of the panel temperature range. Turn it
+            off for a unit that has to update while it is near freezing.
+
+endmenu

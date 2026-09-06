@@ -1,2 +1,16 @@
 # Project defaults. Delete sdkconfig and re-run `idf.py build` to apply changes.
 CONFIG_IDF_TARGET="esp32c6"
+
+# ESP32-C6-FH4 carries 4 MB of flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Console over native USB-Serial-JTAG (GPIO12/13), not UART. The board routes no
+# UART off-chip, and leaving the UART console enabled would drive GPIO16/17 -
+# GPIO16 is BAT_MEAS_EN here, so the console would fight the battery divider
+# enable. See docs/hardware/README.md §2.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# The board is fitted with the WeAct Studio 1.54" black/white module
+# (GDEH0154D67 on an SSD1681). Switching to the four-colour variant
+# (GDEM0154F51H, JD79660) is this one symbol - see components/eink/Kconfig.projbuild.
+CONFIG_EINK_PANEL_SSD1681=y
