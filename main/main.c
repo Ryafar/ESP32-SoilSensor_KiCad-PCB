@@ -23,6 +23,7 @@
 #include "i2c_scan.h"
 #include "rgb.h"
 #include "rgb_test_task.h"
+#include "wifi_test_task.h"
 
 static const char *TAG = "soilsensor";
 
@@ -37,6 +38,10 @@ static const char *TAG = "soilsensor";
 #define EINK_TEST_TASK_PRIO 3
 #define BATTERY_TEST_TASK_STACK 4096
 #define BATTERY_TEST_TASK_PRIO 3
+/* The scan blocks in this task and the results are sorted and formatted here,
+ * on top of whatever the WiFi driver charges to the caller. */
+#define WIFI_TEST_TASK_STACK 4096
+#define WIFI_TEST_TASK_PRIO 3
 
 #define I2C_TIMEOUT_MS 100
 
@@ -122,6 +127,10 @@ void app_main(void)
                 EINK_TEST_TASK_PRIO, NULL);
     xTaskCreate(battery_test_task, "battery_test", BATTERY_TEST_TASK_STACK,
                 &s_battery_test_cfg, BATTERY_TEST_TASK_PRIO, NULL);
+    /* Owns the radio end to end, the same way the e-ink task owns the panel -
+     * nothing else in this build touches WiFi. */
+    xTaskCreate(wifi_test_task, "wifi_test", WIFI_TEST_TASK_STACK, NULL,
+                WIFI_TEST_TASK_PRIO, NULL);
 
     /* app_main returns; FreeRTOS deletes the main task and the created tasks
      * keep running. */
