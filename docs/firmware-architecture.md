@@ -44,10 +44,12 @@ holding `app_main()`. Inside it:
 
 ```
 main/
-  main.c        app_main: create shared resources, init drivers, start tasks
-  config.h      pin map, thresholds, divider factor
-  bringup/      hardware checks: does this board work at all
-  app/          the real firmware: state machine, board glue  (not written yet)
+  main.c            app_main: picks which half of the firmware runs, nothing else
+  config.h          pin map, thresholds, divider factor
+  bringup/          hardware checks: does this board work at all
+    bringup.c       their entry point: buses, drivers, task switches
+  app/              the real firmware: state machine, board glue  (not written yet)
+    app_run.c       its entry point, same job for the application
 ```
 
 The split between `bringup/` and `app/` is deliberate. Bring-up code answers
@@ -59,8 +61,17 @@ the throwaway half never gets thrown away.
 Not called `test/`, because in ESP-IDF that name belongs to Unity unit tests,
 and next to `app/` it would read as "the tests for app/" — which these are not.
 
-`main.c` stays short by design — it is the only place that decides stack sizes
-and priorities, and that is easier to review when it is the only thing there.
+`main.c` stays short by design: it includes `bringup.h` and `app_run.h`, calls
+one of them, and holds no drivers, tasks or shared resources of its own. Each
+half is then self-contained — `bringup.c` and `app_run.c` each create their own
+buses and decide their own stack sizes and priorities, so the checks can be
+rewired without touching the application and the application can be flashed
+without dragging the checks along. Neither half includes the other; the only
+thing that knows about both is `main.c`, because a file cannot sensibly decide
+whether it itself should run.
+
+Priorities are still decided in one visible place per build — that place is the
+entry point of the half being built, not a file shared between them.
 Sources are picked up through `SRC_DIRS`; a newly added file needs an
 `idf.py reconfigure` before the glob sees it.
 
