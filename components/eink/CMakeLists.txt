@@ -1,15 +1,8 @@
-# Only the controller for the panel that is actually fitted gets compiled.
-#
-# This works on SRCS but would NOT work on REQUIRES: component requirements are
-# resolved in CMake's early-expansion pass, before Kconfig values exist, so an
-# if(CONFIG_...) around a REQUIRES silently takes the wrong branch. SRCS is read
-# in the second pass, where CONFIG_ is available.
-set(srcs "eink.c" "eink_canvas.c" "epd_bus.c")
-if(CONFIG_EINK_PANEL_JD79660)
-    list(APPEND srcs "jd79660.c")
-else()
-    list(APPEND srcs "ssd1681.c")
-endif()
+# Both controller files are listed, but each one's body is behind the #if in
+# include/eink_panel.h, so only the fitted panel's driver produces any code.
+# CMake cannot read that header, which is why the selection is done by the
+# preprocessor rather than here.
+set(srcs "eink.c" "eink_canvas.c" "epd_bus.c" "ssd1681.c" "jd79660.c")
 
 # eink.h is the only header anything outside this component may include. The
 # controller drivers, the transport and the canvas are private on purpose: the

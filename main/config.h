@@ -16,6 +16,10 @@
 #define PIN_EPD_MOSI        7   // SPI MOSI, display is write-only
 #define PIN_EPD_POWER      23   // load switch for the display rail (AO3401A)
 
+/* Which of the two panels is fitted is a build-time choice and lives in
+ * components/eink/include/eink_panel.h - it decides which controller driver is
+ * compiled, so it cannot come from here. */
+
 /* SPI2 is the only general-purpose SPI host on the C6, and the display is the
  * only device on it. Expanded at the point of use, so config.h stays free of
  * ESP-IDF headers. */

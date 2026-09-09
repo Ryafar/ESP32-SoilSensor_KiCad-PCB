@@ -16,7 +16,7 @@
  * datasheet the register writes came from. eink.c itself contains no controller
  * registers at all.
  *
- * Two panels are supported, picked in menuconfig under "E-ink display":
+ * Two panels are supported, picked by the #define in eink_panel.h:
  *
  *   SSD1681   WeAct Studio 1.54" black/white, panel GDEH0154D67. Fitted today.
  *             200x200, ~2.5 s full refresh, ~0.5 s partial.
@@ -80,6 +80,22 @@ esp_err_t eink_render(const eink_screen_t *screen);
  * that clears ghosting, so it is what the first frame after a cold start and
  * the last frame before a long sleep should use. */
 esp_err_t eink_render_full(const eink_screen_t *screen);
+
+/* Bring-up patterns. Each answers one question, in the order you want them
+ * answered, before any layout code is in the picture. */
+typedef enum {
+    EINK_PATTERN_WHITE,    // does the glass update at all
+    EINK_PATTERN_BLACK,    // is black really black - polarity of the pixel bits
+    EINK_PATTERN_QUADRANT, // orientation: black top-left quarter inside a 1 px frame
+    EINK_PATTERN_CHECKER,  // packing: a wrong row stride shows up as diagonal stripes
+    EINK_PATTERN_COLORS,   // four-colour panel only: white/black/yellow/red bands
+} eink_pattern_t;
+
+/* Draws one of the patterns above and pushes it with the full waveform. Exists
+ * for bring-up: when a panel shows nothing, this separates "the bus and the
+ * controller work" from "the layout is wrong", which eink_render() alone
+ * cannot. */
+esp_err_t eink_show_pattern(eink_pattern_t pattern);
 
 /* True while the controller is still busy with the previous refresh. */
 bool eink_is_busy(void);

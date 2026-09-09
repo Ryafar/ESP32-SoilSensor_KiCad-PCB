@@ -10,7 +10,5 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 # enable. See docs/hardware/README.md §2.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
-# The board is fitted with the WeAct Studio 1.54" black/white module
-# (GDEH0154D67 on an SSD1681). Switching to the four-colour variant
-# (GDEM0154F51H, JD79660) is this one symbol - see components/eink/Kconfig.projbuild.
-CONFIG_EINK_PANEL_SSD1681=y
+# The panel choice is not a Kconfig symbol. It is a #define in
+# components/eink/include/eink_panel.h - change it there and rebuild.

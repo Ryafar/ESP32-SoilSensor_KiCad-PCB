@@ -1,20 +1,7 @@
 menu "E-ink display"
 
-    choice EINK_PANEL
-        prompt "Panel and controller"
-        default EINK_PANEL_SSD1681
-        help
-            Which of the two WeAct Studio 1.54" modules is fitted to CON1. The
-            choice decides which controller driver is used and how many bits
-            per pixel the framebuffer carries, so it is a build-time setting,
-            not a runtime one.
-
-        config EINK_PANEL_SSD1681
-            bool "1.54\" black/white - GDEH0154D67, SSD1681"
-
-        config EINK_PANEL_JD79660
-            bool "1.54\" four colour - GDEM0154F51H, JD79660"
-    endchoice
+    # The panel choice is NOT here. It is a plain #define in
+    # components/eink/include/eink_panel.h - one line, no menuconfig.
 
     config EINK_SPI_CLOCK_HZ
         int "SPI clock (Hz)"
@@ -36,7 +23,6 @@ menu "E-ink display"
 
     config JD79660_FAST_MODE
         bool "Four-colour panel: use the fast refresh waveform"
-        depends on EINK_PANEL_JD79660
         default y
         help
             Cuts a full four-colour refresh from roughly 30 s to roughly 21 s,

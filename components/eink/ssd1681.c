@@ -1,5 +1,9 @@
 #include "ssd1681.h"
 
+#include "eink_panel.h"
+
+#if EINK_PANEL_SSD1681_BW
+
 #include "esp_check.h"
 
 static const char *TAG = "ssd1681";
@@ -192,3 +196,5 @@ esp_err_t ssd1681_sleep(void)
     s_bus = NULL;
     return ESP_OK;
 }
+
+#endif /* EINK_PANEL_SSD1681_BW */

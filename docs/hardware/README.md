@@ -99,7 +99,8 @@ Read directly from the schematic. **Verify against your own board before flashin
 | PAPER_POWER | GPIO23 | display rail load switch, **active low** — drive to GND to power the panel |
 
 **Panel:** WeAct Studio 1.54" e-paper module, 8-pin FPC. Two variants exist and
-the firmware supports both, selected in `menuconfig` → *E-ink display*:
+the firmware supports both. Which one is fitted is one `#define` in
+`components/eink/include/eink_panel.h` — set one of the two to 1 and rebuild:
 
 | Variant | Panel | Controller | Resolution | Refresh |
 |---|---|---|---|---|

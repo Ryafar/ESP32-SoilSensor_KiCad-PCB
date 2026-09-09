@@ -1,5 +1,9 @@
 #include "jd79660.h"
 
+#include "eink_panel.h"
+
+#if EINK_PANEL_JD79660_COLOR
+
 #include "esp_check.h"
 
 static const char *TAG = "jd79660";
@@ -194,3 +198,5 @@ esp_err_t jd79660_sleep(void)
     s_bus = NULL;
     return ESP_OK;
 }
+
+#endif /* EINK_PANEL_JD79660_COLOR */

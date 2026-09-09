@@ -22,8 +22,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "eink_panel.h"
 #include "esp_err.h"
-#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,7 +32,7 @@ extern "C" {
 #define EINK_CANVAS_WIDTH 200
 #define EINK_CANVAS_HEIGHT 200
 
-#if CONFIG_EINK_PANEL_JD79660
+#if EINK_PANEL_JD79660_COLOR
 #define EINK_CANVAS_BITS_PER_PIXEL 2
 #else
 #define EINK_CANVAS_BITS_PER_PIXEL 1
@@ -53,7 +53,7 @@ typedef enum {
 /* The colour used for anything that should stand out - a low battery, a charge
  * indicator. Red on the four-colour panel, black on the other one, which is as
  * much emphasis as it has to give. */
-#if CONFIG_EINK_PANEL_JD79660
+#if EINK_PANEL_JD79660_COLOR
 #define EINK_ACCENT EINK_RED
 #else
 #define EINK_ACCENT EINK_BLACK

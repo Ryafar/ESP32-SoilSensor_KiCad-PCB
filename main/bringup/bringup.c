@@ -60,7 +60,7 @@ static const char *TAG = "bringup";
  * is one place that says what is live. */
 #define RUN_RGB_TEST     0
 #define RUN_CHARGER_TEST 1
-#define RUN_EINK_TEST    0
+#define RUN_EINK_TEST    1
 #define RUN_BATTERY_TEST 0  // needs a cell attached, otherwise it only logs -1
 #define RUN_SOIL_TEST    0
 /* Rail toggle instead of the measurement loop: drives SOIL_POWER (GPIO14) up

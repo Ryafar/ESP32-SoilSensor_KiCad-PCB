@@ -268,9 +268,12 @@ fixed two real things: `PRIV_INCLUDE_DIRS` makes `eink.h` the only reachable
 header, so `main` can no longer bypass the component and drive the controller
 directly, and the unused controller stopped being compiled at all (see below).
 
-Which controller is compiled in is a **build-time** choice (`menuconfig` →
-*E-ink display*), because it sets the framebuffer depth — 1 bpp for the
-black/white panel, 2 bpp for the four-colour one. Making it a runtime choice
+Which controller is compiled in is a **build-time** choice — the two `#define`s
+in `components/eink/include/eink_panel.h` — because it sets the framebuffer
+depth: 1 bpp for the black/white panel, 2 bpp for the four-colour one. It sits
+in the component rather than in `main/config.h` because `components/` may not
+include that file, and a build-time constant cannot travel through an init
+struct the way a pin number does. A `#error` catches setting both or neither. Making it a runtime choice
 would mean carrying both, and the drawing code would have to branch per pixel.
 As it stands the drawing code is written once against a colour enum, and the
 packing is the only thing that differs.

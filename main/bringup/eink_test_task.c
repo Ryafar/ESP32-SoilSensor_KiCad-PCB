@@ -6,11 +6,45 @@
 
 #include "config.h"
 #include "eink.h"
+#include "eink_panel.h"
 
 static const char *TAG = "eink_test";
 
-/* Long enough to look at the panel and compare it against the log line. */
+/* Long enough to look at the panel and compare it against the log line. The
+ * four-colour panel earns a longer look: its refresh alone is ~21 s, so a short
+ * hold makes the whole run feel like it is racing past. */
+#if EINK_PANEL_JD79660_COLOR
+#define SCREEN_HOLD_MS 8000
+#else
 #define SCREEN_HOLD_MS 4000
+#endif
+
+/* Stage one: patterns, before any layout. If one of these is wrong the problem
+ * is the bus, the controller or the panel - the layout code cannot be blamed
+ * for a screen that will not go black. Each line says what should be on the
+ * glass, so the log can be read next to the panel. */
+static const struct {
+    const char *description;
+    eink_pattern_t pattern;
+} k_patterns[] = {
+    {"all white - the glass should clear completely, no ghosting left over",
+     EINK_PATTERN_WHITE},
+    {"all black - fully dark. Grey or patchy means the waveform or the supply, "
+     "not the drawing code",
+     EINK_PATTERN_BLACK},
+    {"black square in ONE quarter, thin frame around the whole screen. Which "
+     "corner the square sits in tells you the orientation; a missing frame edge "
+     "means the window is offset",
+     EINK_PATTERN_QUADRANT},
+    {"25 px checkerboard, 8x8 squares, flush with all four edges. Diagonal "
+     "stripes instead of squares means the row stride is wrong",
+     EINK_PATTERN_CHECKER},
+#if EINK_PANEL_JD79660_COLOR
+    {"four horizontal bands, top to bottom: white, black, yellow, red. This is "
+     "the only step that exercises the colour planes at all",
+     EINK_PATTERN_COLORS},
+#endif
+};
 
 /* Each step names what should be on the glass, so the log and the panel can be
  * read side by side. The values are made up - nothing is measured yet. */
@@ -69,13 +103,38 @@ void eink_test_task(void *arg)
          * never came up. PAPER_POWER polarity is no longer a suspect - it is
          * confirmed active low in config.h. */
         ESP_LOGE(TAG, "eink_init failed: %s", esp_err_to_name(err));
-        ESP_LOGE(TAG, "check: is the FPC seated, is the panel type in menuconfig right, "
-                      "and is BUSY really on GPIO%d", PIN_EPD_BUSY);
+        ESP_LOGE(TAG, "check: is the FPC seated, is the panel picked in "
+                      "eink_panel.h the one actually fitted, and is BUSY really "
+                      "on GPIO%d", PIN_EPD_BUSY);
         vTaskDelete(NULL);
         return;
     }
 
-    for (size_t i = 0; i < sizeof(k_sequence) / sizeof(k_sequence[0]); i++) {
+#if EINK_PANEL_JD79660_COLOR
+    ESP_LOGI(TAG, "four-colour panel: every refresh is a full one (~21 s) - the "
+                  "partial/full labels below do not apply, the controller has "
+                  "only one mode. Nine screens, so budget about four minutes");
+#else
+    ESP_LOGI(TAG, "black/white panel: ~2.5 s full refresh, ~0.5 s partial");
+#endif
+
+    for (size_t i = 0; i < sizeof(k_patterns) / sizeof(k_patterns[0]); i++) {
+        ESP_LOGI(TAG, "pattern %u/%u: %s", (unsigned)(i + 1),
+                 (unsigned)(sizeof(k_patterns) / sizeof(k_patterns[0])),
+                 k_patterns[i].description);
+
+        err = eink_show_pattern(k_patterns[i].pattern);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "pattern failed: %s - stopping here, the layout "
+                          "screens would only add noise", esp_err_to_name(err));
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(SCREEN_HOLD_MS));
+    }
+
+    /* Stage two: the real layout. Only meaningful once the patterns above came
+     * out right. */
+    for (size_t i = 0; err == ESP_OK && i < sizeof(k_sequence) / sizeof(k_sequence[0]); i++) {
         ESP_LOGI(TAG, "screen %u/%u (%s refresh): %s", (unsigned)(i + 1),
                  (unsigned)(sizeof(k_sequence) / sizeof(k_sequence[0])),
                  k_sequence[i].full_refresh ? "full" : "partial", k_sequence[i].description);
