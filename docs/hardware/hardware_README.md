@@ -104,8 +104,14 @@ the firmware supports both. Which one is fitted is one `#define` in
 
 | Variant | Panel | Controller | Resolution | Refresh |
 |---|---|---|---|---|
-| Black/white (**fitted**) | GDEH0154D67 | SSD1681 | 200×200, 1 bpp | ~2.5 s full, ~0.5 s partial |
-| Four colour | GDEM0154F51H | JD79660 | 200×200, 2 bpp | ~21 s, no partial mode |
+| Black/white | GDEH0154D67 | SSD1681 | 200×200, 1 bpp | ~2.5 s full, ~0.5 s partial |
+| Four colour (**fitted**) | GDEM0154F51H | JD79660 | 200×200, 2 bpp | ~21 s, no partial mode |
+
+The fitted module is the four-colour one — black, white, red and yellow. Two
+consequences worth carrying into the firmware: there is **no partial refresh**,
+so every update is the full ~21 s with the rail up, and red and yellow are
+available as real colours rather than as emphasis that has to be faked with
+black.
 
 Sources: [WeActStudio.EpaperModule](https://github.com/WeActStudio/WeActStudio.EpaperModule)
 (vendor reference code under `Doc/1.54 Inch Black&Write/`, controller names in
@@ -543,7 +549,7 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
 - [x] Active polarity: `SOIL_POWER` and `PAPER_POWER` are **active low** (P-FET gates to GND); `BAT_MEAS_EN` is **active high** with a pull-down.
 - [x] Charger pin biasing: 10 kΩ pull-ups on `INT`, `POWER_GOOD`, `CHARGE_EN`; pull-down on `BAT_MEAS_EN`.
 - [ ] **`CHARGE_EN` pull-up is wrong for this part** (§4.2a). `/CE` is active low with an internal 5 MΩ pulldown, so the 10 kΩ pull-up disables charging by default and costs 330 µA whenever firmware holds it low. Works around it in firmware today; the fix is a pull-down, or no resistor, in the next revision.
-- [x] Exact e-ink controller: **SSD1681** (WeAct 1.54" B/W module, panel GDEH0154D67, 200×200). The 4-colour variant of the same module (GDEM0154F51H) is **JD79660** — both drivers exist, see §2 "E-ink display".
+- [x] Exact e-ink controller: the fitted module is the **four-colour** WeAct 1.54" (black/white/red/yellow), panel GDEM0154F51H, controller **JD79660**, 200×200, 2 bpp, ~21 s per refresh and no partial mode. The black/white variant (GDEH0154D67, **SSD1681**) is the other supported option — both drivers exist, see §2 "E-ink display".
 - [ ] Soil probe output range (for calibration).
 - [ ] CON2: three contacts or four? The part number says three, the text said four (§1).
 - [ ] `SW3`: is it the charger's TS/MR wake button? Decides whether ship mode can be exited without USB.

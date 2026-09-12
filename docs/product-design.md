@@ -17,8 +17,16 @@ behaviour, this one wins and the other gets fixed.
 
 Status: partly implemented. `main/app/` runs the measure-and-report half of §2
 - charger configuration, battery reading, the threshold branch, soil sampling,
-and an MQTT publish with Home Assistant discovery - on a one-minute timer
-instead of a deep-sleep cycle, so it can be watched in a terminal.
+an MQTT publish with Home Assistant discovery, and the e-paper screen - on a
+one-minute timer instead of a deep-sleep cycle, so it can be watched in a
+terminal.
+
+The screen is redrawn only when the picture would actually differ, which is
+policy rather than an optimisation: a refresh costs 2.5 s on the black/white
+panel and about 21 s on the four-colour one, with the panel rail up throughout,
+and the displayed values change far more slowly than the measurement interval.
+The panel rail goes down after every refresh - e-paper holds its image with no
+power.
 
 Not implemented yet, and each one changes what the numbers mean:
 
@@ -31,7 +39,6 @@ Not implemented yet, and each one changes what the numbers mean:
   is published on its own, which §6.2 calls the right first implementation.
 * **Calibration from NVS** (§7). Compile-time constants only, and the wet point
   is a placeholder.
-* **The e-ink screen** (§2). The driver works, the application does not draw.
 
 ---
 
@@ -256,12 +263,33 @@ the curve.
 
 | Point | Value | Status |
 |---|---|---|
-| Dry, held in air | **2719 mV** | measured during bring-up |
-| Wet, submerged to the working depth | 1200 mV | **placeholder, never measured** |
+| Wet, 100 % | **1000 mV** | chosen |
+| Dry, 0 % | **2500 mV** | chosen |
 
-The placeholder exists so the percentage has a scale at all. Until the probe has
-been in water at working depth, the millivolts logged next to the percentage are
-the number to trust - `soil_read()` returns both for exactly that reason.
+Chosen rather than measured, and both ends clamp: the probe reads about 2736 mV
+in air, which lands on 0 %, and anything below 1.0 V reads 100 %. For reference,
+bring-up measured 2719 mV with the probe held in air - so "dry" on this scale is
+slightly wetter than "in air", which is the right way round for a pot of soil.
+
+The millivolts stay worth logging next to the percentage, and `soil_read()`
+returns both: a scale whose ends were picked rather than measured can be
+re-picked later, and the raw number is what makes that possible after the fact.
+The open question is not the electrical range any more but what the numbers mean
+in potting mix at working depth - soil never reaches either end of this scale.
+
+The probe's output **falls** as the soil gets wetter: high in air, low in water.
+`soil_init()` checks that the dry point is above the wet one and reports
+`percent = -1` rather than dividing by a negative span, so a probe wired the
+other way round shows up as a missing percentage instead of a plausible wrong
+one.
+
+Two further thresholds drive what the screen looks like, in `config.h`:
+`SOIL_WARN_PERCENT` (40 %) turns the reading yellow, `SOIL_ALERT_PERCENT`
+(20 %) turns it red. They are about the plant, so the display component only
+ever sees "ok / warn / alert" and decides what that looks like - the same split
+as the status LED. Both inherit the calibration's uncertainty: while the wet
+point is a placeholder, so is the meaning of "20 %". A failed reading is drawn
+neutral, never as an alert nobody can act on.
 
 Between them the mapping is linear and clamped to 0–100 %. That is not
 physically exact, but the number is a gardening aid, not an instrument reading,

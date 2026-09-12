@@ -45,15 +45,32 @@
 #define SOIL_SETTLE_MS              100
 #define SOIL_ADC_SAMPLES            16      // averaged per reading
 
-/* Two-point calibration, docs/product-design.md §7. Dry was measured during
- * bring-up by holding the probe in air.
+/* Two-point calibration, docs/product-design.md §7. The probe's output falls as
+ * the soil gets wetter, so dry has to be the larger number - soil_init()
+ * rejects the other order rather than reporting a percentage derived from a
+ * negative span.
  *
- * Wet is NOT measured yet - this is a placeholder so the percentage has a scale
- * at all, and every percentage the firmware reports is wrong by whatever the
- * real wet point turns out to be. The millivolts next to it in the log are the
- * number to trust until the probe has been in water at working depth. */
-#define SOIL_CALIBRATION_DRY_MV     2719
-#define SOIL_CALIBRATION_WET_MV     1200    // PROVISIONAL, see above
+ * Chosen rather than measured: 1.0 V counts as fully wet, 2.5 V and above as
+ * fully dry. Both ends are clamped, so the probe reading 2736 mV in air simply
+ * reads 0 %, and dunking it below 1.0 V reads 100 %. That is deliberate - the
+ * scale is a gardening aid, and rounding the ends off costs nothing the number
+ * was ever precise enough to say.
+ *
+ * 1500 mV of span over 100 points means one percent is 15 mV, comfortably
+ * above the probe's own noise. Worth revisiting with the probe actually in soil
+ * at working depth: potting mix never reaches either end of this scale. */
+#define SOIL_CALIBRATION_DRY_MV     2500
+#define SOIL_CALIBRATION_WET_MV     1000
+
+/* When the screen stops being black and starts being yellow, then red. These
+ * are about the plant, not about the display, which is why they live here and
+ * the panel only ever sees "ok / warn / alert".
+ *
+ * Both inherit the calibration's uncertainty: while the wet point above is a
+ * placeholder, so is the meaning of "20 %". Worth re-picking once the probe has
+ * been in water - the colour logic itself does not change. */
+#define SOIL_WARN_PERCENT           40      // drying out
+#define SOIL_ALERT_PERCENT          20      // water it now
 
 /* --- Battery / charger BQ25186 ------------------------------------------- */
 #define PIN_I2C_SDA        18

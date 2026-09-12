@@ -9,8 +9,9 @@ Two halves, one switch. The **bring-up** half is a set of hardware checks meant
 to be read in a serial log; the **application** half is the firmware that has to
 survive, designed in [docs/product-design.md](docs/product-design.md). The
 application currently measures soil and battery on a one-minute timer, logs
-each reading and publishes it to MQTT with Home Assistant discovery. Deep
-sleep, the RTC sample buffer and the e-ink screen are the parts still missing.
+each reading, publishes it to MQTT with Home Assistant discovery and draws it
+on the e-paper screen. Deep sleep and the RTC sample buffer are the parts still
+missing.
 
 ## Repository layout
 

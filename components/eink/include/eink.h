@@ -18,10 +18,11 @@
  *
  * Two panels are supported, picked by the #define in eink_panel.h:
  *
- *   SSD1681   WeAct Studio 1.54" black/white, panel GDEH0154D67. Fitted today.
- *             200x200, ~2.5 s full refresh, ~0.5 s partial.
- *   JD79660   WeAct Studio 1.54" four colour, panel GDEM0154F51H. 200x200,
- *             black/white/red/yellow, ~21 s per refresh and no partial mode.
+ *   JD79660   WeAct Studio 1.54" four colour, panel GDEM0154F51H. Fitted
+ *             today. 200x200, black/white/red/yellow, ~21 s per refresh and no
+ *             partial mode - every update is a full one.
+ *   SSD1681   WeAct Studio 1.54" black/white, panel GDEH0154D67. 200x200,
+ *             ~2.5 s full refresh, ~0.5 s partial.
  *
  * The choice is build-time because it sets the framebuffer depth. Nothing else
  * in the firmware has to know which one is fitted.
@@ -55,10 +56,25 @@ typedef struct {
     bool power_active_low; // AO3401A is a P-FET: gate to GND conducts. True on this board.
 } eink_config_t;
 
+/* How dry is dry enough to shout about. The application decides where the
+ * thresholds are - they depend on the plant, not on the display - and this
+ * component decides what each level looks like. Same split as rgb_status_t:
+ * callers talk about state, never about colour.
+ *
+ * On the four-colour panel these become black, yellow and red. On the
+ * black/white one they all draw black: the number is the message there, and a
+ * grey-dithered digit would be less legible, not more. */
+typedef enum {
+    EINK_MOISTURE_OK = 0, // nothing to do
+    EINK_MOISTURE_WARN,   // drying out, water it soon
+    EINK_MOISTURE_ALERT,  // water it now
+} eink_moisture_level_t;
+
 /* What the application actually wants to show. Kept as data rather than as
  * drawing calls so the state machine never has to know about pixels. */
 typedef struct {
     int soil_percent;    // -1 when there is no valid reading
+    eink_moisture_level_t moisture;
     int battery_mv;
     bool charging;
     bool battery_low;

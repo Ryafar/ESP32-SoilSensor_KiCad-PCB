@@ -147,10 +147,35 @@ static void draw_bar(int percent, eink_color_t color)
                           BAR_H - 2 * inset, color);
 }
 
+/* The one place that turns a moisture level into ink. Yellow and red are only
+ * real on the four-colour panel; the black/white one draws all three the same,
+ * because the alternative there is dithering a digit, which costs legibility
+ * and buys nothing. */
+static eink_color_t moisture_color(eink_moisture_level_t level)
+{
+#if EINK_PANEL_JD79660_COLOR
+    switch (level) {
+    case EINK_MOISTURE_ALERT:
+        return EINK_RED;
+    case EINK_MOISTURE_WARN:
+        return EINK_YELLOW;
+    case EINK_MOISTURE_OK:
+        break;
+    }
+    return EINK_BLACK;
+#else
+    (void)level;
+    return EINK_BLACK;
+#endif
+}
+
 static void draw_screen(const eink_screen_t *screen)
 {
     eink_canvas_clear(EINK_WHITE);
 
+    /* The drop stays black: it is the label for the reading, not part of it.
+     * Colouring both the icon and the number would leave nothing to compare
+     * the colour against. */
     draw_drop(DROP_CX, DROP_CY, DROP_RADIUS, EINK_BLACK);
     draw_battery(BATTERY_X, BATTERY_Y, battery_percent(screen->battery_mv), screen->charging,
                  screen->battery_low ? EINK_ACCENT : EINK_BLACK);
@@ -161,14 +186,18 @@ static void draw_screen(const eink_screen_t *screen)
     const int block_w = number_w + PERCENT_GAP + PERCENT_W;
     const int block_x = (EINK_CANVAS_WIDTH - block_w) / 2;
 
+    /* Number and bar share the colour, so the reading says "water me" from
+     * across the room without anyone reading the digits. */
+    const eink_color_t value_color = moisture_color(screen->moisture);
+
     eink_canvas_number(block_x, VALUE_Y, VALUE_DIGIT_W, VALUE_DIGIT_H, VALUE_STROKE, VALUE_GAP,
-                       screen->soil_percent, EINK_BLACK);
+                       screen->soil_percent, value_color);
     eink_canvas_percent(block_x + number_w + PERCENT_GAP, VALUE_Y, PERCENT_W, PERCENT_H,
-                        PERCENT_STROKE, EINK_BLACK);
+                        PERCENT_STROKE, value_color);
 
     /* An empty outline for "no reading" rather than a bar at zero, which would
      * claim bone-dry soil the sensor never measured. */
-    draw_bar(screen->soil_percent < 0 ? 0 : screen->soil_percent, EINK_BLACK);
+    draw_bar(screen->soil_percent < 0 ? 0 : screen->soil_percent, value_color);
 
     if (screen->battery_low) {
         eink_canvas_rect(0, 0, EINK_CANVAS_WIDTH, EINK_CANVAS_HEIGHT, ALERT_FRAME_THICKNESS,
@@ -235,10 +264,23 @@ esp_err_t eink_init(const eink_config_t *config)
     }
 
 #if EINK_PANEL_JD79660_COLOR
-    ESP_RETURN_ON_ERROR(jd79660_init(s_bus), TAG, "panel init failed");
+    const esp_err_t panel_err = jd79660_init(s_bus);
 #else
-    ESP_RETURN_ON_ERROR(ssd1681_init(s_bus), TAG, "panel init failed");
+    const esp_err_t panel_err = ssd1681_init(s_bus);
 #endif
+    if (panel_err != ESP_OK) {
+        /* The controller's init powered the rail before it failed, and the
+         * caller cannot take it down - eink_power_off() refuses while s_ready
+         * is false. So it happens here: any function that brings a rail up
+         * takes it down on every exit path, error paths included. A panel left
+         * powered outlives the cell. */
+        const esp_err_t power_err = epd_bus_power_off(s_bus);
+        if (power_err != ESP_OK) {
+            ESP_LOGE(TAG, "panel init failed AND the rail did not come down: %s",
+                     esp_err_to_name(power_err));
+        }
+        ESP_RETURN_ON_ERROR(panel_err, TAG, "panel init failed");
+    }
 
     /* Nothing is known about what is on the glass after a reset, so the next
      * refresh has to be a full one whatever the caller asks for. */

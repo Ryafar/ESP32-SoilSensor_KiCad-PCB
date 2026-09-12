@@ -13,8 +13,8 @@
  *
  * What is not implemented yet, and is not pretended to be: ship mode on a flat
  * cell (see APP_ALLOW_SHIP_MODE), the RTC ring buffer and bundled publishing
- * (§6.2 says publishing every cycle is the right first implementation), NVS
- * calibration, and the e-ink screen.
+ * (§6.2 says publishing every cycle is the right first implementation), and
+ * reading the calibration from NVS.
  */
 #include "app_run.h"
 
@@ -27,6 +27,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "app_display.h"
 #include "app_net.h"
 #include "app_sample.h"
 #include "battery.h"
@@ -37,7 +38,9 @@
 
 static const char *TAG = "app";
 
-#define MEASURE_TASK_STACK 6144
+/* The panel init sequence, the canvas calls and the MQTT publish all run in
+ * this one task. The framebuffer itself is on the heap. */
+#define MEASURE_TASK_STACK 8192
 #define MEASURE_TASK_PRIO 3
 
 #define I2C_TIMEOUT_MS 100
@@ -58,6 +61,14 @@ static const char *TAG = "app";
  * Which measurements happen is decided by the sequence in §2, from the cell
  * voltage and USB; isolating a single sensor is what main/bringup/ is for. */
 #define APP_ENABLE_NETWORK 1
+
+/* 0 leaves the e-paper panel alone. A refresh blocks the measure task for
+ * 2.5 s on the black/white panel and around 21 s on the four-colour one, which
+ * is a long time to wait when the thing being debugged is a sensor reading.
+ *
+ * Which panel is fitted is a separate, build-time choice and lives in
+ * components/eink/include/eink_panel.h. */
+#define APP_ENABLE_DISPLAY 1
 
 /* What the sequence decided this cycle. Logged by name, because "which branch
  * did it take" is the first question about any reading. */
@@ -207,6 +218,17 @@ static bool set_charging_allowed(bool allowed)
     return true;
 }
 
+/* Wrapper so the switch appears once instead of at every call site. */
+static void update_display(const app_sample_t *sample, bool battery_low)
+{
+#if APP_ENABLE_DISPLAY
+    app_display_update(sample, battery_low);
+#else
+    (void)sample;
+    (void)battery_low;
+#endif
+}
+
 static cycle_decision_t decide(const battery_reading_t *battery, bool battery_valid,
                                bool usb_present)
 {
@@ -315,6 +337,12 @@ static void measure_once(void)
 
     if (decision == CYCLE_LOW_BATTERY) {
         rgb_set_status(RGB_STATUS_BATTERY_LOW);
+
+        /* The screen goes up before ship mode, not after: ship mode opens the
+         * BATFET and there is no "after" (product design §2). Whatever is on
+         * the glass when the rail dies is what someone finds days later, so it
+         * has to be the low-battery frame. */
+        update_display(&sample, true);
 #if APP_ALLOW_SHIP_MODE
         /* Nothing after this line executes: the BATFET opens while the write is
          * still being acknowledged. */
@@ -337,6 +365,12 @@ static void measure_once(void)
         }
     }
 #endif
+
+    /* Last, and after the publish, because it is the only step that can be
+     * skipped without losing data - and because it is by far the slowest
+     * (product design §2). Redraws only when the picture would actually
+     * differ; app_display decides that. */
+    update_display(&sample, false);
 
     /* The LED says what the board is doing between measurements. It costs real
      * current and comes off the budget once deep sleep lands - for bench work

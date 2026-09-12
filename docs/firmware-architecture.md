@@ -491,14 +491,17 @@ and so that unresolved hardware questions block as little as possible.
 | 5 | `soil/` | ✅ done — the wet calibration point is still a placeholder |
 | 6 | `eink/` | ✅ done — panel driver, both controllers, bring-up task |
 | 7 | App stage 1: measure + report | ✅ done — `main/app/`: the §2 sequence without sleep, on a one-minute timer, publishing to MQTT every cycle |
-| 8 | `power/` + the real cycle | Deep sleep, RTC ring buffer, bundled publish, radio up only on a publish cycle. Measure the actual sleep current here |
-| 9 | Calibration into NVS | The two soil points and the divider ratio, so a board can be calibrated without a rebuild |
-| 10 | The e-ink screen in the app | Last, because it is the only step whose absence loses no data |
+| 8 | `/CE` control + the screen in the app | ✅ done — charging is enabled only while VIN is present (hardware README §4.2a), and the panel is redrawn when the picture would differ |
+| 9 | `FLAG0` in the app | The charger's latched events are invisible today, and they clear on read - so this has to land before the device starts sleeping through them |
+| 10 | `power/` + the real cycle | Deep sleep, RTC ring buffer, bundled publish, radio up only on a publish cycle, `/CE` held across sleep, `rgb_deinit()` and `eink_power_off()` before it. Measure the actual sleep current here |
+| 11 | Calibration into NVS | The two soil points and the divider ratio, so a board can be calibrated without a rebuild |
 
-Steps 8-10 are what is left. The order is deliberate: sleep first, because the
-sleep current is the number the whole power budget rests on, and because the
-ring buffer and the publish bundling only mean something once RAM stops
-surviving between measurements.
+Steps 9-11 are what is left. The order is deliberate: the charger's latched
+flags first, because they are consumed by whoever reads them and a sleeping
+device would lose them unnoticed; then sleep, because the sleep current is the
+number the whole power budget rests on, and because the ring buffer and the
+publish bundling only mean something once RAM stops surviving between
+measurements.
 
 ---
 
