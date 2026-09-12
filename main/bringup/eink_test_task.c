@@ -19,10 +19,16 @@ static const char *TAG = "eink_test";
 #define SCREEN_HOLD_MS 4000
 #endif
 
-/* Stage one: patterns, before any layout. If one of these is wrong the problem
- * is the bus, the controller or the panel - the layout code cannot be blamed
- * for a screen that will not go black. Each line says what should be on the
- * glass, so the log can be read next to the panel. */
+/* Patterns, and nothing else. If one of these is wrong the problem is the bus,
+ * the controller or the panel - which is the whole question this task exists to
+ * answer. Each line says what should be on the glass, so the log can be read
+ * next to the panel.
+ *
+ * It used to draw the product's screen with made-up readings too. That moved
+ * out with the layout itself: the layout now lives in main/app/app_screen.c,
+ * and the two halves of the firmware do not include each other. Checking how
+ * the layout looks is a job for the application build, which draws real
+ * readings anyway. */
 static const struct {
     const char *description;
     eink_pattern_t pattern;
@@ -44,40 +50,6 @@ static const struct {
      "the only step that exercises the colour planes at all",
      EINK_PATTERN_COLORS},
 #endif
-};
-
-/* Each step names what should be on the glass, so the log and the panel can be
- * read side by side. The values are made up - nothing is measured yet. */
-static const struct {
-    const char *description;
-    eink_screen_t screen;
-    bool full_refresh;
-} k_sequence[] = {
-    {
-        "no reading yet: two dashes, empty bar, half-full battery",
-        {.soil_percent = -1, .battery_mv = 3800, .charging = false, .battery_low = false},
-        true,
-    },
-    {
-        "dry soil: 7 %, bar barely started",
-        {.soil_percent = 7, .battery_mv = 3800, .charging = false, .battery_low = false},
-        false,
-    },
-    {
-        "damp soil: 42 %, bar under half",
-        {.soil_percent = 42, .battery_mv = 3950, .charging = false, .battery_low = false},
-        false,
-    },
-    {
-        "wet soil on USB: 100 %, full bar, charge bolt in the battery",
-        {.soil_percent = 100, .battery_mv = 4150, .charging = true, .battery_low = false},
-        false,
-    },
-    {
-        "low battery: empty battery icon and a frame around the screen",
-        {.soil_percent = 42, .battery_mv = 3320, .charging = false, .battery_low = true},
-        true,
-    },
 };
 
 void eink_test_task(void *arg)
@@ -111,9 +83,9 @@ void eink_test_task(void *arg)
     }
 
 #if EINK_PANEL_JD79660_COLOR
-    ESP_LOGI(TAG, "four-colour panel: every refresh is a full one (~21 s) - the "
-                  "partial/full labels below do not apply, the controller has "
-                  "only one mode. Nine screens, so budget about four minutes");
+    ESP_LOGI(TAG, "four-colour panel: every refresh is a full one (~21 s) - "
+                  "the controller has no partial mode. Five patterns, so budget "
+                  "about two and a half minutes");
 #else
     ESP_LOGI(TAG, "black/white panel: ~2.5 s full refresh, ~0.5 s partial");
 #endif
@@ -125,24 +97,7 @@ void eink_test_task(void *arg)
 
         err = eink_show_pattern(k_patterns[i].pattern);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "pattern failed: %s - stopping here, the layout "
-                          "screens would only add noise", esp_err_to_name(err));
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(SCREEN_HOLD_MS));
-    }
-
-    /* Stage two: the real layout. Only meaningful once the patterns above came
-     * out right. */
-    for (size_t i = 0; err == ESP_OK && i < sizeof(k_sequence) / sizeof(k_sequence[0]); i++) {
-        ESP_LOGI(TAG, "screen %u/%u (%s refresh): %s", (unsigned)(i + 1),
-                 (unsigned)(sizeof(k_sequence) / sizeof(k_sequence[0])),
-                 k_sequence[i].full_refresh ? "full" : "partial", k_sequence[i].description);
-
-        err = k_sequence[i].full_refresh ? eink_render_full(&k_sequence[i].screen)
-                                         : eink_render(&k_sequence[i].screen);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "render failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "pattern failed: %s - stopping here", esp_err_to_name(err));
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(SCREEN_HOLD_MS));

@@ -1,17 +1,18 @@
 /* Framebuffer and drawing primitives for the 200x200 panel.
  *
- * Panel-agnostic on purpose: the pixel format is chosen at build time from the
- * panel Kconfig choice, so the same drawing code produces a 1 bpp frame for the
+ * Panel-agnostic on purpose: the pixel format is chosen at build time by the
+ * #define in eink_panel.h, so the same drawing code produces a 1 bpp frame for the
  * SSD1681 and a 2 bpp frame for the JD79660 with no conversion pass and no
  * second buffer. The colour codes are the JD79660's own, which makes the
  * four-colour packing a plain store; on the black/white panel every colour that
  * is not EINK_WHITE lands as black, which is the right answer for an accent
  * colour on a panel that cannot show it.
  *
- * There is no font here. Everything this device displays is a number, a bar or
- * an icon, and seven-segment digits drawn from rectangles cost a few hundred
- * bytes of code against a few kilobytes for a bitmap font - while being far
- * more legible at the sizes this screen needs.
+ * There is no font here, and that is a limit worth knowing before reusing this:
+ * it draws numbers, bars and shapes. Seven-segment digits built from rectangles
+ * cost a few hundred bytes of code against a few kilobytes for a bitmap font,
+ * and they are far more legible at the sizes a 200x200 panel needs - but a
+ * project that has to show words needs a font added here.
  *
  * Coordinates are pixels from the top-left. Every primitive clips; drawing
  * off-canvas is a no-op, not an error, because the alternative is that a

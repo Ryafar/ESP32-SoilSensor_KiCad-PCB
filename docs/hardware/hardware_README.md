@@ -32,7 +32,10 @@ PDF is right and this file needs fixing.
 | Battery voltage sense | 2 × 100 kΩ divider + BSS138 switch | ADC + enable |
 | Charger thermistor | TH1, bottom side | none — wired to the charger's TS pin |
 | Buttons | RESET, BOOT (GPIO9), and SW3 | see §1.2 |
-| Battery | 1-cell LiPo, 500 mAh or 1000 mAh | — |
+| Battery | 1-cell LiPo, 500 mAh or 1000 mAh, on JST PH 2-pin (U6, S2B-PH-K-S) | — |
+| Main crystal | 40 MHz, Murata XRCGB40M000F1S1BR0 (U1) | — |
+| USB data protection | ECMF02-2AMX6 common-mode filter with ESD (U4), plus ESD9B5.0ST5G on VBUS (D1) | on the D+/D− pair |
+| Status LED | SML-P12PTT86R + 1.8 kΩ (LED1, R5) | GPIO17, see §2 |
 
 > **CON2 pin count.** The part number `S3B-PH-SM4` is a **3-circuit** JST PH
 > connector, and the bottom-side render shows three contacts. Earlier revisions
@@ -59,6 +62,10 @@ Read off the 3D renders. Everything is on the top side except where noted.
 | CON2 | soil probe connector | **bottom side** |
 | TH1 | thermistor | **bottom side**, centre |
 | USB-C | power and USB-Serial-JTAG | bottom edge |
+| U1 | 40 MHz crystal | beside U3 |
+| U4 | USB common-mode filter | by the USB-C connector |
+| U6 | battery JST PH 2-pin | **bottom side** |
+| LED1 | plain status LED | see §2 |
 
 The MCU is a bare chip with an on-board antenna, not a shielded module. That
 matters for anything that touches the RF path — keep-out areas, enclosure
@@ -154,6 +161,28 @@ Two consequences worth carrying into the power budget:
 | Signal | GPIO | Notes |
 |---|---|---|
 | RGB DIN | GPIO8 | Würth WL-ICLED — drive with the RMT peripheral (WS2812 protocol) |
+
+### LED1 — plain status LED
+| Signal | GPIO | Notes |
+|---|---|---|
+| LED1 | GPIO17 | SML-P12PTT86R behind R5 = 1.8 kΩ, lit by driving the pin **high** (~0.8 mA). Unused by firmware; driven low at boot |
+
+Two things make this pin worth treating carefully rather than as a spare
+indicator:
+
+* **A steady LED is unaffordable here.** An SML-P12PTT86R behind R5 = 1.8 kΩ
+  draws roughly 0.8 mA at 3.3 V, which is about 19 mAh per day out of a 500 mAh
+  cell — nearly two orders of magnitude above the ~10 µA sleep target, and it
+  would flatten the cell in under four weeks on its own. Whatever it is used
+  for has to be momentary.
+* **GPIO17 is UART0 RX by default**, which is the second reason the UART console
+  must stay off (the first is GPIO16 = `BAT_MEAS_EN`). An input pull-up on this
+  net leaks roughly 70 µA through the LED, which is seven times the sleep
+  budget, and may show as a faint glow.
+
+Out of reset and in deep sleep the pad is high-impedance and the LED is dark,
+which is the right default; firmware drives it low so that "off" is a level
+rather than an assumption about what the ROM left behind.
 
 ### System / boot
 | Signal | GPIO | Notes |
@@ -505,7 +534,7 @@ Keep both load switches OFF and the RGB dark during sleep.
 - **I²C pull-ups:** 10 kΩ on both lines, on the board. Comfortable at 100 kHz; on the weak side for 400 kHz, where the rise time starts to depend on how much capacitance the traces add. Bring up at 100 kHz and only raise the clock once the bus is proven. The ESP32's internal pull-ups (~45 kΩ) may stay enabled — in parallel they help rather than hurt — but the board does not depend on them.
 - **SPI e-ink:** write-only; wait on BUSY between commands. Prefer partial refresh; full refresh periodically to clear ghosting.
 - **RGB:** ESP-IDF `led_strip` (RMT backend), wrapped by `components/rgb/`. The WL-ICLED 1312020030000 is listed by Würth as *single wire, 24 bit* and uses the standard WS2812 protocol, so it's a drop-in for the old SK6812 in software. It runs on the **same 3.3 V rail as the ESP32**, so GPIO8's logic level needs no shifter — ignore the 5 V / 5.5 V figures some distributor listings quote. Remaining unknown: byte order may be **RGB** instead of the WS2812-default **GRB**; set `color_component_format` in the `led_strip` config if red and green come out swapped. Don't drive GPIO8 low at reset (strapping pin).
-- **Power switches:** AO3401A are P-FETs, so both rails are **active low** — `SOIL_POWER` and `PAPER_POWER` conduct when the GPIO is driven to GND. Note what that means at reset: an ESP32 GPIO comes up as a floating input, so neither rail is held off by the MCU until firmware configures the pin. Drive both high (off) as the first thing after boot, before anything else claims the pins.
+- **Power switches:** AO3401A are P-FETs, so both rails are **active low** — `SOIL_POWER` and `PAPER_POWER` conduct when the GPIO is driven to GND. **Each gate carries a 100 kΩ resistor to its source**, which is what actually defines the rails: with the MCU's pad floating — at reset, or in deep sleep, where digital pads go high-impedance — the gate sits at the source and the FET is off. Firmware still drives both pins to their off level early, but that is belt and braces rather than the thing keeping the probe unpowered. Without those resistors, every deep sleep would leave two gates floating and the sleep current would be anyone's guess.
 - **Pull-ups and pull-downs on the charger pins:** `INT`, `POWER_GOOD` and `CHARGE_EN` each carry a 10 kΩ pull-up, so the ESP32's internal pull-ups are not needed on any of them. `BAT_MEAS_EN` has a pull-down instead, which is the right default: the divider stays disconnected until firmware actively asks for a reading, including while the MCU is asleep or in reset.
 - **Ship mode sequencing:** the I²C write that enters ship mode is the last thing the ESP32 does — nothing executes after it (see 3.2).
 - **Console:** UART unused; route all logging over **USB-Serial-JTAG** (GPIO12/13). Set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` in menuconfig.
@@ -546,12 +575,13 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
   from GPIO0.
 - [x] RGB supply rail: 3.3 V, shared with the ESP32 — no level shifter needed.
 - [ ] RGB color byte order (RGB vs GRB) — verify once lit.
-- [x] Active polarity: `SOIL_POWER` and `PAPER_POWER` are **active low** (P-FET gates to GND); `BAT_MEAS_EN` is **active high** with a pull-down.
+- [x] Active polarity: `SOIL_POWER` and `PAPER_POWER` are **active low** (P-FET gates to GND), each gate biased off by a 100 kΩ resistor to its source, so both rails are defined with the MCU asleep or unprogrammed; `BAT_MEAS_EN` is **active high** with a pull-down.
 - [x] Charger pin biasing: 10 kΩ pull-ups on `INT`, `POWER_GOOD`, `CHARGE_EN`; pull-down on `BAT_MEAS_EN`.
 - [ ] **`CHARGE_EN` pull-up is wrong for this part** (§4.2a). `/CE` is active low with an internal 5 MΩ pulldown, so the 10 kΩ pull-up disables charging by default and costs 330 µA whenever firmware holds it low. Works around it in firmware today; the fix is a pull-down, or no resistor, in the next revision.
 - [x] Exact e-ink controller: the fitted module is the **four-colour** WeAct 1.54" (black/white/red/yellow), panel GDEM0154F51H, controller **JD79660**, 200×200, 2 bpp, ~21 s per refresh and no partial mode. The black/white variant (GDEH0154D67, **SSD1681**) is the other supported option — both drivers exist, see §2 "E-ink display".
 - [ ] Soil probe output range (for calibration).
-- [ ] CON2: three contacts or four? The part number says three, the text said four (§1).
+- [x] CON2 is **three** contacts: the schematic says `S3B-PH-SM4-TB`, a 3-circuit JST PH, top-entry SMD. The probe is powered by `SOIL_POWER` switching its supply, not by a dedicated enable line.
 - [ ] `SW3`: is it the charger's TS/MR wake button? Decides whether ship mode can be exited without USB.
-- [ ] Identify `U1`, `U4`, `U6` and `LED1` from the schematic — visible on the renders, not described here. `U6` sits on the bottom side and looks like a connector; if that is the battery JST it belongs in the §1 table.
+- [x] `U1`, `U4`, `U6` identified from the schematic: `U1` is the **40 MHz main crystal** (Murata XRCGB40M000F1S1BR0) for the C6's oscillator — not to be confused with the 32.768 kHz RTC crystal, which this board deliberately does not have (§5 of the product design). `U4` is an **ECMF02-2AMX6** common-mode filter with integrated ESD protection on the USB D+/D− pair, with `D1` (ESD9B5.0ST5G) on VBUS. `U6` is the **battery connector**, JST PH 2-circuit `S2B-PH-K-S` — now in the §1 table.
+- [x] `LED1` is a plain status LED on **GPIO17**, lit by driving the pin high. See §2 "LED1".
 - [ ] The four ringed pads on the bottom side: test points, and for what?

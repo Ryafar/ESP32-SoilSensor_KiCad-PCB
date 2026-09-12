@@ -1,5 +1,6 @@
 #include "app_display.h"
 
+#include "app_screen.h"
 #include "config.h"
 #include "eink.h"
 #include "esp_log.h"
@@ -13,58 +14,33 @@ static const char *TAG = "app_display";
  * enough that ADC noise does not trigger a 21-second refresh. */
 #define BATTERY_COMPARE_STEP_MV 50
 
+/* What the glass is currently showing, in the terms that decide the picture.
+ * The moisture colour is a function of the percentage, so it needs no field of
+ * its own - if the percentage is unchanged, the colour is too. */
+typedef struct {
+    int soil_percent;
+    int battery_step;
+    bool charging;
+    bool battery_low;
+} shown_state_t;
+
 static bool s_have_frame;
-static eink_screen_t s_shown;
+static shown_state_t s_shown;
 
-/* For the log line. The colour on the glass is the component's business, but
- * which level the app decided belongs in the log next to the percentage. */
-static const char *level_name(eink_moisture_level_t level)
+static shown_state_t state_of(const app_sample_t *sample, bool battery_low)
 {
-    switch (level) {
-    case EINK_MOISTURE_OK:
-        return "ok";
-    case EINK_MOISTURE_WARN:
-        return "drying";
-    case EINK_MOISTURE_ALERT:
-        return "water it";
-    }
-    return "?";
-}
-
-/* A reading that failed is not dry soil - it gets the neutral level, so a
- * broken probe never draws a red alert nobody can act on. */
-static eink_moisture_level_t moisture_level(int soil_percent)
-{
-    if (soil_percent < 0) {
-        return EINK_MOISTURE_OK;
-    }
-    if (soil_percent <= SOIL_ALERT_PERCENT) {
-        return EINK_MOISTURE_ALERT;
-    }
-    if (soil_percent <= SOIL_WARN_PERCENT) {
-        return EINK_MOISTURE_WARN;
-    }
-    return EINK_MOISTURE_OK;
-}
-
-static eink_screen_t screen_from(const app_sample_t *sample, bool battery_low)
-{
-    return (eink_screen_t){
+    return (shown_state_t){
         .soil_percent = sample->soil_percent,
-        .moisture = moisture_level(sample->soil_percent),
-        .battery_mv = sample->battery_mv,
+        .battery_step = sample->battery_mv / BATTERY_COMPARE_STEP_MV,
         .charging = sample->charging,
         .battery_low = battery_low,
     };
 }
 
-static bool differs(const eink_screen_t *a, const eink_screen_t *b)
+static bool differs(const shown_state_t *a, const shown_state_t *b)
 {
-    return a->soil_percent != b->soil_percent ||
-           a->moisture != b->moisture ||
-           a->charging != b->charging ||
-           a->battery_low != b->battery_low ||
-           a->battery_mv / BATTERY_COMPARE_STEP_MV != b->battery_mv / BATTERY_COMPARE_STEP_MV;
+    return a->soil_percent != b->soil_percent || a->battery_step != b->battery_step ||
+           a->charging != b->charging || a->battery_low != b->battery_low;
 }
 
 void app_display_update(const app_sample_t *sample, bool battery_low)
@@ -73,8 +49,8 @@ void app_display_update(const app_sample_t *sample, bool battery_low)
         return;
     }
 
-    const eink_screen_t screen = screen_from(sample, battery_low);
-    if (s_have_frame && !differs(&screen, &s_shown)) {
+    const shown_state_t state = state_of(sample, battery_low);
+    if (s_have_frame && !differs(&state, &s_shown)) {
         return;
     }
 
@@ -101,23 +77,24 @@ void app_display_update(const app_sample_t *sample, bool battery_low)
 
     const int64_t started_us = esp_timer_get_time();
 
-    /* The first frame of a boot is a full refresh: nothing is known about what
-     * is on the glass, and a partial refresh on top of an unknown image keeps
-     * whatever ghost was there. Afterwards the component decides, promoting to
-     * a full refresh on its own schedule. */
-    err = s_have_frame ? eink_render(&screen) : eink_render_full(&screen);
+    app_screen_draw(sample, battery_low);
+
+    /* The first frame of a boot gets the full waveform: nothing is known about
+     * what is on the glass, and a partial refresh on top of an unknown image
+     * keeps whatever ghost was there. After that the component decides,
+     * promoting to a full refresh on its own schedule. */
+    err = eink_refresh(!s_have_frame);
     const int64_t elapsed_ms = (esp_timer_get_time() - started_us) / 1000;
 
     if (err == ESP_OK) {
-        s_shown = screen;
+        s_shown = state;
         s_have_frame = true;
         /* The duration is logged because it is the one cost of this feature
          * that is easy to forget: on the four-colour panel it is twenty
          * seconds of the measure task doing nothing else. */
-        ESP_LOGI(TAG, "screen updated in %lld ms: soil %d %% (%s), vbat %d mV%s%s",
-                 elapsed_ms, screen.soil_percent, level_name(screen.moisture),
-                 screen.battery_mv, screen.charging ? ", charging" : "",
-                 screen.battery_low ? ", battery low" : "");
+        ESP_LOGI(TAG, "screen updated in %lld ms: soil %d %%, vbat %d mV%s%s", elapsed_ms,
+                 sample->soil_percent, sample->battery_mv, sample->charging ? ", charging" : "",
+                 battery_low ? ", battery low" : "");
     } else {
         ESP_LOGW(TAG, "refresh failed after %lld ms: %s", elapsed_ms, esp_err_to_name(err));
     }

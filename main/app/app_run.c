@@ -20,6 +20,7 @@
 
 #include <inttypes.h>
 
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
@@ -125,8 +126,28 @@ static esp_err_t init_adc(void)
     return adc_oneshot_new_unit(&init_config, &s_adc);
 }
 
+/* LED1 is not used by anything yet, so the only thing worth doing with it is
+ * making sure it is off - as a driven level, not as a hope about what the ROM
+ * left on the pad. GPIO17 is UART0 RX by default and can come up with a
+ * pull-up, which would leak through the LED for the rest of the cell's life.
+ * See config.h for the arithmetic. */
+static esp_err_t init_status_led_off(void)
+{
+    const gpio_config_t led_config = {
+        .pin_bit_mask = 1ULL << PIN_STATUS_LED,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&led_config), TAG, "status led config failed");
+    return gpio_set_level(PIN_STATUS_LED, STATUS_LED_ACTIVE_HIGH ? 0 : 1);
+}
+
 static esp_err_t init_drivers(void)
 {
+    ESP_RETURN_ON_ERROR(init_status_led_off(), TAG, "status led off failed");
+
     const rgb_config_t rgb_cfg = {
         .gpio_num = PIN_RGB_DIN,
         .brightness = 16,

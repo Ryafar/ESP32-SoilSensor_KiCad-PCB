@@ -4,9 +4,10 @@
 # preprocessor rather than here.
 set(srcs "eink.c" "eink_canvas.c" "epd_bus.c" "ssd1681.c" "jd79660.c")
 
-# eink.h is the only header anything outside this component may include. The
-# controller drivers, the transport and the canvas are private on purpose: the
-# application talks to a display, not to an SSD1681.
+# Two public headers: eink.h for the lifecycle and the refresh, eink_canvas.h
+# for drawing. The controller drivers and the transport stay private - a caller
+# talks to a display, not to an SSD1681 - which is also what keeps this
+# component reusable: nothing outside can reach a register.
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "priv_include"

@@ -52,7 +52,9 @@ main/
   app/              the real firmware: state machine, board glue
     app_run.c       its entry point: buses, drivers, the measurement sequence
     app_net.c       WiFi, MQTT, Home Assistant discovery
-    app_sample.h    one cycle's readings, shared by the sequence and the publisher
+    app_display.c   when the panel gets redrawn, and powering it for that
+    app_screen.c    what this device's screen looks like - layout, icons, colours
+    app_sample.h    one cycle's readings, shared by everything above
 ```
 
 The split between `bringup/` and `app/` is deliberate. Bring-up code answers
@@ -309,24 +311,50 @@ Open: the wet calibration point has never been measured — `config.h` carries a
 placeholder, so every percentage the firmware reports today is wrong by whatever
 the real value turns out to be.
 
-### `eink/` — e-ink
+### `eink/` — e-ink ✅ implemented
 
 SPI write-only, plus BUSY / RST / DC and the `PAPER_POWER` rail.
 
 ```c
-esp_err_t eink_init(const eink_config_t *config);
-esp_err_t eink_render(const eink_screen_t *screen);      // soil %, battery, charge state
-esp_err_t eink_render_full(const eink_screen_t *screen); // forces the full waveform
+esp_err_t eink_init(const eink_config_t *config);  // pins, SPI host, rail polarity
+esp_err_t eink_refresh(bool force_full);           // pushes whatever the canvas holds
+esp_err_t eink_show_pattern(eink_pattern_t);       // bring-up diagnostics
+bool      eink_is_busy(void);
 esp_err_t eink_power_off(void);
 ```
 
-One component, but the panel is the one piece of hardware that is not fixed, so
-inside it the display splits into files rather than into a monolith:
+plus the drawing primitives in `eink_canvas.h`: `clear`, `pixel`, `fill_rect`,
+`rect`, `line`, `disc`, `digit`, `number`, `percent`, against a four-value
+colour enum.
+
+**This component knows about a panel, not about a device**, and that is a
+deliberate constraint rather than an accident. It holds no layout, no
+thresholds and no idea what is being displayed; the caller draws with the canvas
+and then calls `eink_refresh()`. The screen of *this* product lives in
+[`main/app/app_screen.c`](../main/app/app_screen.c) — the water drop, the
+battery icon, the moisture colours, the cell-voltage-to-icon mapping.
+
+It was not always this way. `eink.h` used to expose an `eink_screen_t` with a
+`soil_percent` field and an `eink_moisture_level_t`, and `eink.c` drew the
+layout. That reads as convenient and is the wrong boundary: it made a display
+driver un-reusable for anything that is not a plant sensor, and it put product
+decisions — where "dry" starts, what the battery icon means — behind a header
+whose subject is a controller. Moving the layout into `main/app/` cost one file
+and made the component droppable into the next project unchanged.
+
+The one thing the split has to give up: the e-ink bring-up task used to preview
+the layout with made-up readings. It cannot any more, because `bringup/` and
+`app/` do not include each other and only one of them is compiled. The
+bring-up task keeps the patterns, which are what actually answer "is this panel
+wired correctly"; how the layout looks is a question for a build that has real
+readings.
+
+Inside, the display splits into files rather than into a monolith:
 
 | File | Job | Header |
 |---|---|---|
-| `eink.c` | Framebuffer, screen layout, refresh policy | `include/eink.h` — **public** |
-| `eink_canvas.c` | Drawing primitives and the pixel packing | `priv_include/` |
+| `eink.c` | Lifecycle, refresh policy, patterns | `include/eink.h` — **public** |
+| `eink_canvas.c` | Drawing primitives and the pixel packing | `include/eink_canvas.h` — **public** |
 | `epd_bus.c` | SPI, D/C, RST, BUSY and the rail. The half both controllers share | `priv_include/` |
 | `ssd1681.c` | Black/white controller. Packed 1 bpp, full and partial refresh | `priv_include/` |
 | `jd79660.c` | Four-colour controller. Packed 2 bpp, one refresh mode | `priv_include/` |
@@ -354,13 +382,17 @@ would mean carrying both, and the drawing code would have to branch per pixel.
 As it stands the drawing code is written once against a colour enum, and the
 packing is the only thing that differs.
 
-The selection is an `if(CONFIG_EINK_PANEL_JD79660)` around `SRCS` in the
-component's `CMakeLists.txt`, so the other controller is never handed to the
-compiler. Worth knowing why that works on `SRCS` and not on `REQUIRES`: a
-component's `CMakeLists.txt` is evaluated twice, and in the first
-(early-expansion) pass — the one that resolves requirements — `CONFIG_` values
-do not exist yet. A conditional `REQUIRES` therefore takes the wrong branch
-silently. `SRCS` is read in the second pass, where the config is available.
+Both controller files are listed in `SRCS` and each one's body sits behind the
+`#if`, so only the fitted panel's driver produces code. CMake cannot read that
+header, which is why the selection is done by the preprocessor rather than in
+`CMakeLists.txt`.
+
+The one thing this costs for reuse: picking the panel means editing a file
+*inside* the component, which is exactly what you do not want when the
+component is a shared dependency. A Kconfig `choice` would let the consuming
+project select it from its own `sdkconfig.defaults` instead. Worth doing if this
+component is ever actually copied out; not worth the churn while it has one
+consumer.
 
 `epd_bus.c` earns its place under the rule above — it is not a wrapper, it is
 the thing that lets the two controller drivers contain only their own command

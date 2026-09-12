@@ -109,6 +109,23 @@
  * Strapping pin: must not be held low at reset. */
 #define PIN_RGB_DIN         8
 
+/* --- Status LED (LED1) --------------------------------------------------- */
+/* SML-P12PTT86R behind a 1.8 kOhm resistor, lit by driving the pin high.
+ * Unused by the firmware today, and that is a deliberate default rather than an
+ * oversight: it draws about 0.8 mA, which is ~19 mAh per day out of a 500 mAh
+ * cell and would flatten it in under four weeks on its own - nearly two orders
+ * of magnitude above the ~10 uA deep-sleep target. Whatever this pin ends up
+ * doing, it must not be a steady state.
+ *
+ * GPIO17 is also UART0 RX by default on the C6, which is the second reason the
+ * UART console has to stay disabled (the first is GPIO16 = BAT_MEAS_EN): an
+ * input pull-up on this net leaks ~70 uA through the LED and may glow faintly.
+ *
+ * The pin is driven low at boot so "off" is a driven level rather than an
+ * assumption about what the ROM left behind. */
+#define PIN_STATUS_LED     17
+#define STATUS_LED_ACTIVE_HIGH 1
+
 /* --- Buttons ------------------------------------------------------------- */
 #define PIN_BOOT_BUTTON     9   // strapping pin, low at reset -> download mode
 
