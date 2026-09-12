@@ -130,6 +130,10 @@ static esp_err_t init_drivers(void)
         .device_address = BQ25186_I2C_ADDR,
         .scl_speed_hz = I2C_CLK_HZ,
         .timeout_ms = I2C_TIMEOUT_MS,
+        /* The board's pull-up holds /CE high, which disables charging, so this
+         * pin is not optional here - without it the cell never charges. */
+        .ce_gpio = PIN_CHARGE_EN,
+        .drive_ce_pin = true,
     };
     ESP_RETURN_ON_ERROR(bq25186_init(&charger_cfg), TAG, "charger init failed");
     ESP_RETURN_ON_ERROR(bq25186_probe(), TAG,
@@ -178,6 +182,31 @@ static void configure_charger(void)
     }
 }
 
+/* The /CE level currently driven, or -1 before anything has been driven this
+ * boot. Kept so the log gets one line when charging starts or stops, instead of
+ * one every cycle saying the same thing. */
+static int s_charging_allowed = -1;
+
+/* Returns true when the level actually changed. */
+static bool set_charging_allowed(bool allowed)
+{
+    if (s_charging_allowed == (int)allowed) {
+        return false;
+    }
+
+    const esp_err_t err = bq25186_set_ce_pin(allowed);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "could not drive /CE: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    s_charging_allowed = allowed;
+    ESP_LOGI(TAG, "VIN %s -> charging %s (/CE driven %s)",
+             allowed ? "present" : "gone", allowed ? "enabled" : "disabled",
+             allowed ? "low" : "high");
+    return true;
+}
+
 static cycle_decision_t decide(const battery_reading_t *battery, bool battery_valid,
                                bool usb_present)
 {
@@ -219,9 +248,26 @@ static void measure_once(void)
 
     bq25186_charge_state_t charge_state = BQ25186_CHARGE_IDLE;
     bool charger_vin_good = false;
-    const esp_err_t charge_err = bq25186_read_charge_state(&charge_state, &charger_vin_good);
+    esp_err_t charge_err = bq25186_read_charge_state(&charge_state, &charger_vin_good);
     if (charge_err != ESP_OK) {
         ESP_LOGW(TAG, "could not read the charger state: %s", esp_err_to_name(charge_err));
+    }
+
+    /* Charging is allowed exactly while VIN is there, and the decision comes
+     * from the charger's own VIN_PGOOD bit rather than from the board's PGOOD
+     * pin - the chip is the thing whose opinion about its input matters.
+     *
+     * Both directions are load-bearing. Low is what makes the cell charge at
+     * all on this board, because the 10 kOhm pull-up would otherwise hold /CE
+     * high. High is what keeps that pull-up from burning ~330 uA out of the
+     * cell once USB is gone, which is 33x the entire sleep budget. /CE has no
+     * effect without VIN, so this is purely about that current. */
+    if (charge_err == ESP_OK && set_charging_allowed(charger_vin_good)) {
+        /* Re-read after a change: CHG_STAT sampled before the pin moved
+         * describes the previous state, and reporting "not charging" on the
+         * cycle where charging just started is the kind of off-by-one-cycle
+         * that gets debugged twice. */
+        charge_err = bq25186_read_charge_state(&charge_state, &charger_vin_good);
     }
     sample.charging = bq25186_charge_state_is_charging(charge_state);
 

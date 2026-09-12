@@ -70,6 +70,23 @@
  * and only a driven high connects it. */
 #define BAT_MEAS_EN_ACTIVE_HIGH 1
 
+/* CHARGE_EN is the charger's /CE pin: low (or floating) enables charging while
+ * VIN is valid, high disables it, and it has no effect at all without VIN.
+ *
+ * The chip's internal 5 MOhm pulldown means an unconnected pin would enable
+ * charging - but this board's 10 kOhm pull-up overrides that by three orders of
+ * magnitude, so on this board charging is DISABLED until firmware drives the
+ * pin low. That is why nothing charged before this was implemented.
+ *
+ * Driving it low costs VSYS/10k, about 330 uA, for as long as it is low. That
+ * is irrelevant next to a 250 mA charge current and 33x the whole deep-sleep
+ * budget, so the pin goes low only while VIN is actually present.
+ *
+ * A future board revision should drop this pull-up (or make it a pull-down):
+ * the chip's own default is the state you want, and then charging would work
+ * even with no firmware running at all. */
+#define CHARGE_EN_ACTIVE_LOW 1
+
 /* --- RGB status LED ------------------------------------------------------ */
 /* Wuerth WL-ICLED 1312020030000, WS2812-compatible single-wire protocol.
  * Strapping pin: must not be held low at reset. */

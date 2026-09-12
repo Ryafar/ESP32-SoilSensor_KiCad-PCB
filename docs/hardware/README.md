@@ -137,7 +137,7 @@ Two consequences worth carrying into the power budget:
 | SDA | GPIO18 | I²C data, 10 kΩ pull-up fitted |
 | SCL | GPIO19 | I²C clock, 10 kΩ pull-up fitted |
 | INT | GPIO20 | charger interrupt, input, active low, 10 kΩ pull-up fitted |
-| CHARGE_EN | GPIO21 | charge enable output, 10 kΩ pull-up fitted |
+| CHARGE_EN | GPIO21 | charger `/CE`, **active low**, 10 kΩ pull-up fitted — the pull-up disables charging, see §4.2a |
 | POWER_GOOD | GPIO22 | input from charger, 10 kΩ pull-up fitted |
 | BAT_MEAS | GPIO0 | ADC input, 1:2 divider (2 × 100 kΩ) with 100 nF to GND |
 | BAT_MEAS_EN | GPIO16 | battery divider enable (BSS138), **active high**, pull-down fitted — assert only when reading |
@@ -279,6 +279,46 @@ To set 500 mA, from the datasheet formula for ICHG > 35 mA:
 `ICHG = 40 + (CODE − 31) × 10` mA → CODE = 31 + (500 − 40)/10 = **77 = 0x4D**.
 
 > **Write `0x4D` to register `0x04`** (CHG_DIS = 0, ICHG = 500 mA). The 10 mA default must be overwritten or the battery will never charge in reasonable time.
+
+### 4.2a `/CE` and the pull-up that disabled charging
+
+Datasheet, pin description:
+
+> Charge Enable Pin. Drive `/CE` low or leave disconnected to enable charging
+> when VIN is valid. Drive `/CE` high to disable charge. Has an internal
+> pulldown resistor of around 5 MΩ. This pin has no effect when VIN is not
+> present.
+
+So the chip's own default — pin left alone, held down by 5 MΩ — is *charging
+enabled*. **This board fits a 10 kΩ pull-up on that net, which beats the
+internal pulldown by three orders of magnitude, so `/CE` sits high and charging
+is disabled** until firmware drives GPIO21 low. A board with no firmware, or
+firmware that ignores the pin, never charges its cell.
+
+That also explains an otherwise ambiguous symptom: `CHG_STAT = 2b11` reads
+"charge done **or** charging disabled" (§4.4), so a full-looking cell and a
+never-started charge are the same two bits. On this board it was the second.
+
+**Firmware rule:** drive `/CE` low exactly while the charger reports
+`VIN_PGOOD`, high otherwise. Both halves matter:
+
+* **low** is what makes charging happen at all here;
+* **high** is what stops the pull-up from drawing V(SYS)/10 kΩ ≈ **330 µA** out
+  of the cell. That is 33× the ~10 µA deep-sleep target, so leaving it low on
+  battery would dominate the entire power budget — and `/CE` does nothing
+  without VIN anyway, so there is no reason to.
+
+Deep sleep can hold the level: the ESP32-C6 supports per-IO hold through
+deep sleep (`SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP`, via `gpio_hold_en()` +
+`gpio_deep_sleep_hold_en()`), unlike the ESP32/S2/C3/S3/C2. Without that,
+charging would only ever run during the seconds the board is awake. One
+consequence to accept: if USB is unplugged *during* sleep with the level held
+low, the 330 µA flows until the next wake notices and releases it — bounded by
+one sleep interval.
+
+**Recommendation for the next board revision:** drop the pull-up, or make it a
+pull-down. The part's own default is the state you want, the pin then needs no
+firmware at all, and the 330 µA disappears.
 
 ### 4.3 Watchdog gotcha (matters for a sleepy device)
 
@@ -502,6 +542,7 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
 - [ ] RGB color byte order (RGB vs GRB) — verify once lit.
 - [x] Active polarity: `SOIL_POWER` and `PAPER_POWER` are **active low** (P-FET gates to GND); `BAT_MEAS_EN` is **active high** with a pull-down.
 - [x] Charger pin biasing: 10 kΩ pull-ups on `INT`, `POWER_GOOD`, `CHARGE_EN`; pull-down on `BAT_MEAS_EN`.
+- [ ] **`CHARGE_EN` pull-up is wrong for this part** (§4.2a). `/CE` is active low with an internal 5 MΩ pulldown, so the 10 kΩ pull-up disables charging by default and costs 330 µA whenever firmware holds it low. Works around it in firmware today; the fix is a pull-down, or no resistor, in the next revision.
 - [x] Exact e-ink controller: **SSD1681** (WeAct 1.54" B/W module, panel GDEH0154D67, 200×200). The 4-colour variant of the same module (GDEM0154F51H) is **JD79660** — both drivers exist, see §2 "E-ink display".
 - [ ] Soil probe output range (for calibration).
 - [ ] CON2: three contacts or four? The part number says three, the text said four (§1).

@@ -69,6 +69,18 @@ typedef struct {
     uint16_t device_address;     // BQ25186_I2C_ADDR_DEFAULT unless the board says otherwise
     uint32_t scl_speed_hz;
     int timeout_ms;              // per transaction
+
+    /* The /CE pin, if the firmware drives it. Left alone when drive_ce_pin is
+     * false, which is what a zero-initialised config asks for - the safe
+     * default, since a wrong pin number here would drive an unrelated net.
+     *
+     * /CE is active low: low or floating enables charging while VIN is valid,
+     * high disables it. The chip's own 5 MOhm pulldown means "floating" is
+     * "enabled" - but this board fits a 10 kOhm pullup, which wins by three
+     * orders of magnitude, so on this board charging is disabled until
+     * something drives the pin low. See bq25186_set_ce_pin(). */
+    int ce_gpio;
+    bool drive_ce_pin;
 } bq25186_config_t;
 
 /* Raw status registers. Deliberately not decoded into named flags yet: the
@@ -106,7 +118,26 @@ esp_err_t bq25186_dump_registers(void);
 esp_err_t bq25186_set_charge_current(uint16_t milliamps);
 esp_err_t bq25186_get_charge_current(uint16_t *milliamps);
 
+/* CHG_DIS in ICHG_CTRL - the register half of the charge enable. */
 esp_err_t bq25186_set_charging_enabled(bool enabled);
+
+/* The /CE pin - the other, independent half. Both have to allow charging for
+ * current to flow, and they fail differently: CHG_DIS is self-healing, because
+ * the watchdog resets it to "enabled" after 160 s, while the pin keeps whatever
+ * it was driven to.
+ *
+ * `enabled` true drives the asserted (low) level, false drives high. Not
+ * released to the pullup on purpose: a driven level is one that can be read
+ * back and reasoned about.
+ *
+ * Cost on this board: holding the pin low fights the 10 kOhm pullup and draws
+ * ~330 uA for as long as it is low. That is nothing next to a charge current
+ * and 33x the entire deep-sleep budget, so the caller must not leave it enabled
+ * when VIN is gone - which is also when /CE has no effect anyway.
+ *
+ * Returns ESP_ERR_INVALID_STATE if the config did not ask for the pin to be
+ * driven. */
+esp_err_t bq25186_set_ce_pin(bool enabled);
 
 esp_err_t bq25186_read_status(bq25186_status_t *status);
 

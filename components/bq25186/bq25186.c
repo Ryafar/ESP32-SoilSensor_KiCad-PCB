@@ -1,5 +1,6 @@
 #include "bq25186.h"
 
+#include "driver/gpio.h"
 #include "esp_check.h"
 
 static const char *TAG = "bq25186";
@@ -18,6 +19,7 @@ static const char *TAG = "bq25186";
 
 static i2c_master_dev_handle_t s_dev;
 static int s_timeout_ms;
+static int s_ce_gpio = -1; // -1: the firmware does not drive /CE
 
 esp_err_t bq25186_init(const bq25186_config_t *config)
 {
@@ -34,7 +36,35 @@ esp_err_t bq25186_init(const bq25186_config_t *config)
                         TAG, "failed to add device at 0x%02X", config->device_address);
 
     s_timeout_ms = config->timeout_ms;
+
+    if (config->drive_ce_pin) {
+        const gpio_config_t ce_config = {
+            .pin_bit_mask = 1ULL << config->ce_gpio,
+            /* INPUT_OUTPUT, so gpio_get_level reports the pad rather than
+             * echoing the last write - with a 10 kOhm pullup on the net that is
+             * the difference between "we drive it" and "we think we do". */
+            .mode = GPIO_MODE_INPUT_OUTPUT,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_RETURN_ON_ERROR(gpio_config(&ce_config), TAG, "/CE gpio config failed");
+        s_ce_gpio = config->ce_gpio;
+
+        /* Charging off until someone asks for it. Same level the board's pullup
+         * produces, so this changes nothing electrically - it just makes the
+         * state driven and therefore knowable. */
+        ESP_RETURN_ON_ERROR(bq25186_set_ce_pin(false), TAG, "/CE initial level failed");
+    }
+
     return ESP_OK;
+}
+
+esp_err_t bq25186_set_ce_pin(bool enabled)
+{
+    ESP_RETURN_ON_FALSE(s_ce_gpio >= 0, ESP_ERR_INVALID_STATE, TAG,
+                        "this config does not drive /CE");
+
+    /* /CE is active low: low enables charging. */
+    return gpio_set_level(s_ce_gpio, enabled ? 0 : 1);
 }
 
 esp_err_t bq25186_deinit(void)
@@ -43,6 +73,12 @@ esp_err_t bq25186_deinit(void)
 
     ESP_RETURN_ON_ERROR(i2c_master_bus_rm_device(s_dev), TAG, "failed to remove device");
     s_dev = NULL;
+
+    /* The pin keeps whatever level it was driven to - deliberately. Only the
+     * application knows whether charging should continue while it sleeps, and
+     * silently switching it off here would be a policy decision taken in a
+     * driver. It just stops being ours to set. */
+    s_ce_gpio = -1;
     return ESP_OK;
 }
 

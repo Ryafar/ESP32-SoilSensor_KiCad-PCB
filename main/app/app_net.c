@@ -32,15 +32,15 @@ static const char *TAG = "app_net";
 /* Home Assistant's default discovery prefix. */
 #define DISCOVERY_PREFIX "homeassistant"
 
-/* Topic and payload buffers. The state payload is six fixed fields, the
- * discovery payloads are the longest thing here - one device block plus one
- * entity. Sized with headroom and every write is a bounded snprintf. */
 /* An empty credential means "anonymous", which esp-mqtt expresses as NULL, not
  * as an empty string - handing it "" makes it send a zero-length username, and
  * a broker that allows anonymous access can still reject that. sizeof works
  * here because these are string literals from secrets.h: sizeof("") is 1. */
 #define OPTIONAL_CREDENTIAL(s) (sizeof(s) > 1 ? (s) : NULL)
 
+/* Topic and payload buffers. The state payload is seven fixed fields, the
+ * discovery payloads are the longest thing here - one device block plus one
+ * entity. Sized with headroom and every write is a bounded snprintf. */
 #define TOPIC_LEN 128
 #define STATE_PAYLOAD_LEN 256
 #define DISCOVERY_PAYLOAD_LEN 768
@@ -209,13 +209,13 @@ static esp_err_t start_mqtt(void)
     return esp_mqtt_client_start(s_mqtt);
 }
 
-/* One discovery message per entity. All four share the same state topic and
+/* One discovery message per entity. They all share the same state topic and
  * pick their value out of the JSON, which is why a single publish per cycle can
  * feed the whole device.
  *
  * `unique_id` is what lets Home Assistant remember the entity across reboots,
- * and the identical `device.identifiers` is what groups the four into one
- * device rather than four loose sensors. */
+ * and the identical `device.identifiers` is what groups them into one device
+ * rather than a handful of loose sensors. */
 static esp_err_t publish_discovery_entity(const char *object_id, const char *component,
                                           const char *name, const char *extra)
 {
@@ -259,15 +259,36 @@ static esp_err_t publish_discovery(void)
         "soil", "sensor", "Soil moisture",
         "\"unit_of_measurement\":\"%\","
         "\"state_class\":\"measurement\","
+        "\"suggested_display_precision\":0,"
         "\"icon\":\"mdi:water-percent\","
         "\"value_template\":\"{{ value_json.soil_pct }}\","), TAG, "soil discovery");
 
+    /* The probe's own output, next to the percentage that is derived from it.
+     * Worth its own entity as long as the wet calibration point is a
+     * placeholder: this is the number that stays true when the mapping changes,
+     * and graphing it is how the real wet point gets found. */
+    ESP_RETURN_ON_ERROR(publish_discovery_entity(
+        "soil_voltage", "sensor", "Soil voltage",
+        "\"device_class\":\"voltage\","
+        "\"unit_of_measurement\":\"V\","
+        "\"state_class\":\"measurement\","
+        "\"suggested_display_precision\":3,"
+        "\"value_template\":\"{{ value_json.soil_mv / 1000 }}\","),
+        TAG, "soil voltage discovery");
+
+    /* Three decimals, not two: the ADC resolves single millivolts, and the
+     * whole point of this entity is watching a cell drift by a few mV over
+     * hours. Rounding in the template would throw that away before Home
+     * Assistant ever sees it - the state carries full resolution and
+     * suggested_display_precision decides what the dashboard shows, which is a
+     * display setting the user can still change per entity. */
     ESP_RETURN_ON_ERROR(publish_discovery_entity(
         "battery", "sensor", "Battery voltage",
         "\"device_class\":\"voltage\","
         "\"unit_of_measurement\":\"V\","
         "\"state_class\":\"measurement\","
-        "\"value_template\":\"{{ (value_json.vbat_mv | float / 1000) | round(2) }}\","),
+        "\"suggested_display_precision\":3,"
+        "\"value_template\":\"{{ value_json.vbat_mv / 1000 }}\","),
         TAG, "battery discovery");
 
     ESP_RETURN_ON_ERROR(publish_discovery_entity(
