@@ -33,3 +33,6 @@ __pycache__/
 venv/
 .venv/
 CLAUDE.md
+
+# Local secrets: WiFi and MQTT credentials. Template: main/secrets.h.example
+main/secrets.h

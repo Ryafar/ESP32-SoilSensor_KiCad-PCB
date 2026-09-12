@@ -12,3 +12,13 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # The panel choice is not a Kconfig symbol. It is a #define in
 # components/eink/include/eink_panel.h - change it there and rebuild.
+
+# WiFi + MQTT + mbedTLS do not fit the default 1 MB app partition: the
+# application image is ~1.1 MB. The large single-app layout gives the factory
+# partition 1.5 MB, which the 4 MB flash has room for several times over. No
+# OTA partitions - there is no update path on this board, and two app slots
+# would cost more than they buy.
+#
+# NVS stays at 0x9000 with the same size in this layout, so the WiFi driver's RF
+# calibration data survives the change.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y

@@ -9,12 +9,26 @@
  * application can be flashed without dragging the checks along. The switch is
  * here rather than in either half because a file cannot sensibly decide
  * whether it itself should run.
+ *
+ * CMakeLists.txt reads the switch below out of this file and puts only the
+ * selected half into SRC_DIRS, so the other one is not compiled and cannot
+ * reach the image. The shipped firmware therefore contains no bring-up code at
+ * all - which is the whole point of calling it throwaway.
  */
-#include "app_run.h"
-#include "bringup.h"
 
-/* 1 = flash the hardware checks, 0 = flash the application. */
-#define RUN_BRINGUP 1
+/* 1 = flash the hardware checks, 0 = flash the application.
+ *
+ * Before the includes, because it decides which header even exists as far as
+ * this build is concerned. Keep it as a literal `#define X 0|1` on one line:
+ * main/CMakeLists.txt greps for exactly that and fails the build if it is
+ * gone. */
+#define RUN_BRINGUP 0
+
+#if RUN_BRINGUP
+#include "bringup.h"
+#else
+#include "app_run.h"
+#endif
 
 void app_main(void)
 {

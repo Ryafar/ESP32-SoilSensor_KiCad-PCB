@@ -1,0 +1,6 @@
+# ESP-MQTT left the IDF in v6.0 and is a managed component now, so the
+# dependency is declared rather than assumed. The component registers itself as
+# `espressif__mqtt`, which is the name main/CMakeLists.txt has to REQUIRE; the
+# header is still "mqtt_client.h".
+dependencies:
+  espressif/mqtt: "^1.0.0"

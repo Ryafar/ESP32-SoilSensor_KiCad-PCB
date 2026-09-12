@@ -46,6 +46,14 @@ extern "C" {
 #define BQ25186_ICHG_CTRL_CHG_DIS_MASK 0x80 // 1 = charging disabled
 #define BQ25186_ICHG_CTRL_ICHG_MASK    0x7F
 
+/* STAT0 (0x00). Bit positions from docs/hardware/README.md §4.4, which is the
+ * datasheet §6.5.1.1 read against a real dump. Only the two fields the
+ * application needs are named; the rest stay raw in bq25186_status_t until
+ * something actually reads them. */
+#define BQ25186_STAT0_CHG_STAT_MASK    0x60 // bits 6:5, see bq25186_charge_state_t
+#define BQ25186_STAT0_CHG_STAT_SHIFT   5
+#define BQ25186_STAT0_VIN_PGOOD_MASK   0x01 // 1 = VIN above UVLO and VBAT+V(SLEEP)
+
 /* SHIP_RST (0x09): EN_RST_SHIP occupies bits [6:5], 0b10 enters ship mode. */
 #define BQ25186_SHIP_RST_EN_RST_SHIP_MASK  0x60
 #define BQ25186_SHIP_RST_EN_RST_SHIP_SHIP  0x40
@@ -101,6 +109,28 @@ esp_err_t bq25186_get_charge_current(uint16_t *milliamps);
 esp_err_t bq25186_set_charging_enabled(bool enabled);
 
 esp_err_t bq25186_read_status(bq25186_status_t *status);
+
+/* CHG_STAT, the two bits of STAT0 that say what the charger is doing. */
+typedef enum {
+    BQ25186_CHARGE_IDLE = 0,        // 2b00: charging enabled but no valid input, or suspended
+    BQ25186_CHARGE_CONSTANT_CURRENT, // 2b01: trickle, pre-charge or fast charge - not distinguished
+    BQ25186_CHARGE_CONSTANT_VOLTAGE, // 2b10: topping off
+    BQ25186_CHARGE_DONE_OR_DISABLED, // 2b11: full, or the host turned charging off
+} bq25186_charge_state_t;
+
+/* Decoded STAT0. `vin_good` is the charger's own view of the input, which is
+ * worth having next to the board's VIN_PGOOD pin: the two disagreeing means the
+ * pin is not measuring what it is thought to measure.
+ *
+ * BQ25186_CHARGE_DONE_OR_DISABLED is genuinely ambiguous in the hardware - read
+ * CHG_DIS from ICHG_CTRL to tell "full" from "we disabled it". */
+esp_err_t bq25186_read_charge_state(bq25186_charge_state_t *state, bool *vin_good);
+
+/* True only while current is actually going into the cell. */
+bool bq25186_charge_state_is_charging(bq25186_charge_state_t state);
+
+/* For log lines: "constant current", "done or disabled", ... */
+const char *bq25186_charge_state_name(bq25186_charge_state_t state);
 
 /* Opens the BATFET. On this board that removes the system rail, so the ESP32
  * loses power inside this call - it returns only if the write itself failed.

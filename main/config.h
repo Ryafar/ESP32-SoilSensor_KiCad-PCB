@@ -45,6 +45,16 @@
 #define SOIL_SETTLE_MS              100
 #define SOIL_ADC_SAMPLES            16      // averaged per reading
 
+/* Two-point calibration, docs/product-design.md §7. Dry was measured during
+ * bring-up by holding the probe in air.
+ *
+ * Wet is NOT measured yet - this is a placeholder so the percentage has a scale
+ * at all, and every percentage the firmware reports is wrong by whatever the
+ * real wet point turns out to be. The millivolts next to it in the log are the
+ * number to trust until the probe has been in water at working depth. */
+#define SOIL_CALIBRATION_DRY_MV     2719
+#define SOIL_CALIBRATION_WET_MV     1200    // PROVISIONAL, see above
+
 /* --- Battery / charger BQ25186 ------------------------------------------- */
 #define PIN_I2C_SDA        18
 #define PIN_I2C_SCL        19
@@ -73,11 +83,19 @@
 #define BQ25186_I2C_ADDR    0x6A
 
 /* --- Charger configuration ----------------------------------------------- */
-/* Register 0x04: CHG_DIS = 0, ICHG = 500 mA (code 77). The 10 mA reset default
- * must be overwritten. The charger watchdog reverts registers after 160 s, so
- * this gets rewritten on every wake rather than once at first boot. */
+/* The 10 mA reset default must be overwritten, and the charger watchdog reverts
+ * every register after 160 s without an I2C transaction - so this is rewritten
+ * on every wake rather than once at first boot (product design §3.3). */
 #define BQ25186_REG_ICHG_CTRL       0x04
-#define BQ25186_ICHG_500MA          0x4D
+#define BQ25186_ICHG_500MA          0x4D    // raw register code, bring-up pokes only
+
+/* The cell is the knob; the current follows from it. 0.5C is safe for this
+ * 500 mAh pack without leaning on its datasheet allowing 1C, and it stays safe
+ * if a larger cell is fitted instead (product design §3.4, which supersedes the
+ * 500 mA figure in hardware README §4.2). */
+#define BATTERY_CAPACITY_MAH        500
+#define BATTERY_CHARGE_RATE_PERCENT 50
+#define BATTERY_CHARGE_CURRENT_MA   (BATTERY_CAPACITY_MAH * BATTERY_CHARGE_RATE_PERCENT / 100)
 
 /* --- Battery measurement -------------------------------------------------- */
 /* 1:2 divider, 2 x 100 kOhm with 100 nF to GND. Kept as a number rather than a
@@ -98,7 +116,20 @@
 /* Soft threshold, enforced in firmware: below this the board enters ship mode.
  * The charger's own BUVLO sits at 3.0 V and is only a backstop. */
 #define BATTERY_SHIP_MODE_MV        3300
+/* Leaving the low state happens higher than entering it. A cell at 3.35 V sags
+ * below 3.3 V the moment WiFi transmits, and a single threshold would produce a
+ * device that shuts down, gets plugged in, boots and shuts down again
+ * (product design §3.2). */
+#define BATTERY_RECOVER_MV          3500
 
 /* --- Timing -------------------------------------------------------------- */
-/* The soil probe's settle time lives with the other soil constants above. */
-#define MEASUREMENT_INTERVAL_S      (30 * 60)
+/* The soil probe's settle time lives with the other soil constants above.
+ *
+ * Two separate numbers on purpose: the board wakes to measure, and only every
+ * n-th measurement pays for the radio. 5 min x 6 = one publish every half hour
+ * is the design target (product design §2).
+ *
+ * Both are turned down for bench work, where a half hour between log lines just
+ * means waiting. The design values are in the comment, not lost. */
+#define MEASUREMENT_INTERVAL_S      60      // design: 5 * 60
+#define PUBLISH_EVERY_N_MEASUREMENTS 1      // design: 6

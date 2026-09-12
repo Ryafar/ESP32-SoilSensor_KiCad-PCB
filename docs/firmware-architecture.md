@@ -46,10 +46,13 @@ holding `app_main()`. Inside it:
 main/
   main.c            app_main: picks which half of the firmware runs, nothing else
   config.h          pin map, thresholds, divider factor
+  secrets.h         WiFi and MQTT credentials - gitignored, template next to it
   bringup/          hardware checks: does this board work at all
     bringup.c       their entry point: buses, drivers, task switches
-  app/              the real firmware: state machine, board glue  (not written yet)
-    app_run.c       its entry point, same job for the application
+  app/              the real firmware: state machine, board glue
+    app_run.c       its entry point: buses, drivers, the measurement sequence
+    app_net.c       WiFi, MQTT, Home Assistant discovery
+    app_sample.h    one cycle's readings, shared by the sequence and the publisher
 ```
 
 The split between `bringup/` and `app/` is deliberate. Bring-up code answers
@@ -74,6 +77,44 @@ Priorities are still decided in one visible place per build — that place is th
 entry point of the half being built, not a file shared between them.
 Sources are picked up through `SRC_DIRS`; a newly added file needs an
 `idf.py reconfigure` before the glob sees it.
+
+### Switching between the two halves
+
+One line in [`main.c`](../main/main.c):
+
+```c
+/* 1 = flash the hardware checks, 0 = flash the application. */
+#define RUN_BRINGUP 1
+```
+
+Then `idf.py build`. Inside a bring-up build the `RUN_*_TEST` switches at the
+top of [`bringup.c`](../main/bringup/bringup.c) pick which check runs.
+
+A `#define` rather than a Kconfig option, deliberately: the state of the switch
+is then part of the diff, and there is no way to build something different from
+what the repository says because of an untracked local `sdkconfig`. The cost is
+that changing it is a commit — which is the right cost for "which firmware is
+on the board".
+
+**Only the selected half is compiled.** `main/CMakeLists.txt` greps the
+`#define` out of `main.c` and puts only that half into `SRC_DIRS`, so the
+application image contains no bring-up code at all — not unreferenced, not
+sleeping, absent. Throwaway code that ships anyway is not throwaway; and it
+would drag `esp_wifi` and the panel driver into an image whose power budget is
+the whole design (§3.5 of the product design). The numbers, measured: the
+bring-up image is ~960 KB, the application half ~144 KB.
+
+Three consequences worth knowing:
+
+* `main.c` is a cmake configure dependency, so flipping the switch re-runs
+  cmake by itself. Without that, `SRC_DIRS` — a configure-time glob — would
+  keep serving the previous half and the switch would look broken.
+* The switch must stay a literal `#define RUN_BRINGUP 0|1` on one line. If the
+  grep finds nothing the build fails with a message saying so, rather than
+  quietly picking a half.
+* The excluded half is not compiled, so it can rot unnoticed. Building the
+  other half occasionally is the only thing that catches it — cheap, since it
+  is one edited line.
 
 ### The rule that makes it work
 
@@ -149,13 +190,16 @@ helpers and ADC setup. In practice that layer dissolves into three places:
 So there is no `bsp/` component. Nothing is lost; the responsibilities just sit
 where the invariants can actually be enforced.
 
-### Shared resources are owned by `main`
+### Shared resources are owned by the entry point
 
 Two drivers need the same ADC unit: `battery/` samples GPIO0 and `soil/` samples
 GPIO1, and on the C6 both are ADC1 channels. `adc_oneshot_new_unit()` on the
 same unit twice fails, so exactly one place must own the unit handle. That place
-is `main`, which creates it once and passes the handle into both init structs.
-The same goes for the I²C master bus: `main` creates it, `charger/` receives it.
+is the entry point of the build — `bringup.c` today, `app_run.c` once it
+exists — which creates it once and passes the handle into both init structs.
+The same goes for the I²C master bus: the entry point creates it, `charger/`
+receives it. Since only one half ever runs, there is no contest over who
+allocates what.
 
 Drivers therefore **borrow, never own** shared buses. They own only what is
 exclusively theirs — `rgb/` owns its RMT channel, each driver owns its enable
@@ -187,51 +231,83 @@ deep sleep so the RMT peripheral is released.
 
 Open: byte order (GRB vs RGB) unverified — see hardware README §9.
 
-### `charger/` — BQ25186
+### `bq25186/` — charger ✅ implemented
 
-I²C at 0x6A, plus INT / CHARGE_EN / POWER_GOOD as plain GPIO.
+Named after the part, not after the role: it is a chip driver with no policy in
+it. I²C at 0x6A; INT, CHARGE_EN and POWER_GOOD are plain GPIO and belong to
+whoever reads them (`battery/` does).
 
 ```c
-esp_err_t charger_init(const charger_config_t *config);  // borrows i2c_master_bus_handle_t
-esp_err_t charger_configure(void);       // ICHG = 500 mA, watchdog policy
-esp_err_t charger_read_status(charger_status_t *out);    // charging? fault? power good?
-esp_err_t charger_enter_ship_mode(void); // does not return in the usual sense
+esp_err_t bq25186_init(const bq25186_config_t *config); // borrows i2c_master_bus_handle_t
+esp_err_t bq25186_probe(void);                          // reads STAT0: does it answer at all
+esp_err_t bq25186_set_charge_current(uint16_t ma);      // also clears CHG_DIS
+esp_err_t bq25186_read_status(bq25186_status_t *out);   // raw STAT0/STAT1/FLAG0
+esp_err_t bq25186_read_charge_state(bq25186_charge_state_t *, bool *vin_good);
+esp_err_t bq25186_enter_ship_mode(void);                // does not return in the usual sense
+esp_err_t bq25186_read_reg(uint8_t reg, uint8_t *value); // and write/update, for bring-up
 ```
 
-`charger_configure()` is deliberately separate from `charger_init()` and is
-called on **every wake**, not once: the charger's watchdog expires after 160 s
-and resets ICHG back to its 10 mA default. Treating the charger as stateless is
-simpler than keeping it fed across deep sleep.
+There is no `charger_configure()`. The application calls
+`bq25186_set_charge_current()` on **every wake**, because the charger's watchdog
+expires after 160 s and resets ICHG back to its 10 mA default — but which
+current, and when, is policy and stays out of the driver.
 
-`charger_enter_ship_mode()` opens the BATFET, which removes the system rail and
+`bq25186_read_status()` hands back raw registers on purpose: most of those bits
+have never been needed, and a wrong flag name is worse than a byte.
+`bq25186_read_charge_state()` decodes the two fields that *are* needed, with the
+bit positions taken from hardware README §4.4.
+
+`bq25186_enter_ship_mode()` opens the BATFET, which removes the system rail and
 therefore powers down the ESP32 mid-instruction. It is the last thing the
 firmware ever executes. It gets a doc comment saying exactly that, because it
 looks like an ordinary function and is not one.
 
-### `battery/` — cell voltage and state of charge
+### `battery/` — cell voltage ✅ implemented
 
 ```c
-esp_err_t battery_init(const battery_config_t *config);  // borrows adc_oneshot_unit_handle_t
-esp_err_t battery_read_mv(int *out_mv);   // asserts BAT_MEAS_EN, samples, deasserts
-bool battery_is_low(int mv);              // against BATTERY_SHIP_MODE_MV
+esp_err_t battery_init(const battery_config_t *config); // borrows adc_oneshot_unit_handle_t
+esp_err_t battery_read(battery_reading_t *out);         // millivolts + usb_present + charger_int
+esp_err_t battery_deinit(void);
 ```
 
-`battery_read_mv()` asserts the divider enable, waits for settling, averages
-several conversions, deasserts, and only then returns — the enable is never left
-on. Needs `adc_cali` for a usable absolute voltage, and the divider ratio, which
-is still an open hardware item.
+One call rather than a voltage function and a status function: the divider
+enable, the two charger status pins and the conversion all happen in one place,
+and the caller cannot take them apart in a way that leaves the divider
+connected. `battery_read()` asserts the enable, waits out the RC, averages,
+deasserts — on the error path too — and only then returns.
 
-### `soil/` — capacitive probe
+It returns `ESP_ERR_INVALID_STATE` for a voltage no 1-cell LiPo can have. That
+check is in the driver because the alternative was seen during bring-up: a
+divider that never switched in reads near full scale, and the ratio turns that
+into a confident-looking 7 V.
+
+There is no `battery_is_low()`. Which voltage counts as low is policy, it needs
+hysteresis and the USB state to mean anything, and it lives in the application.
+
+Open: the divider ratio is still the nominal 2.0 — it wants calibrating against
+a multimeter (`BATTERY_DIVIDER_RATIO` in `config.h`).
+
+### `soil/` — capacitive probe ✅ implemented
 
 ```c
-esp_err_t soil_init(const soil_config_t *config);   // borrows the same ADC unit
-esp_err_t soil_read_raw(int *out_mv);
-esp_err_t soil_read_percent(int *out_percent);      // via the calibration curve
+esp_err_t soil_init(const soil_config_t *config); // borrows the same ADC unit
+esp_err_t soil_read(soil_reading_t *out);         // millivolts and percent together
+esp_err_t soil_deinit(void);
 ```
 
-Same discipline as `battery/`: power the probe, settle ~50 ms, average, power
-down. The dry/wet calibration points are empirical and belong in `config.h` once
-measured.
+Same discipline as `battery/`: rail on, settle, average, rail off, error paths
+included. Millivolts and percentage come back together rather than from two
+functions, because the percentage depends on a calibration that is provisional
+and the raw value is what stays true — separating them invites reporting one
+without the other.
+
+`percent` is `-1` when the two calibration points do not bracket a range, which
+is more useful than a number derived from a division that should not have
+happened.
+
+Open: the wet calibration point has never been measured — `config.h` carries a
+placeholder, so every percentage the firmware reports today is wrong by whatever
+the real value turns out to be.
 
 ### `eink/` — e-ink
 
@@ -409,12 +485,20 @@ and so that unresolved hardware questions block as little as possible.
 | # | Step | Unblocks / notes |
 |---|---|---|
 | 1 | `rgb/` | ✅ done — first proof the board runs our code |
-| 2 | Console + flash config | `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`, `CONFIG_ESPTOOLPY_FLASHSIZE_4MB`. Frees GPIO16 for `BAT_MEAS_EN` — must land before step 4 |
-| 3 | `charger/` | I²C bring-up. First real check that the bus works: read a known register and compare against the datasheet reset value |
-| 4 | `battery/` | Needs the divider ratio measured on hardware |
-| 5 | `soil/` | Needs dry/wet calibration points measured on hardware |
-| 6 | `power/` + state machine | First full cycle: wake, measure, sleep. Measure the actual sleep current here |
-| 7 | `eink/` | Bring-up needs the panel in hand: check orientation, ghosting after partial refreshes, and that the image survives `eink_power_off()` |
+| 2 | Console + flash config | ✅ done — `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`, `CONFIG_ESPTOOLPY_FLASHSIZE_4MB`. Frees GPIO16 for `BAT_MEAS_EN` |
+| 3 | `bq25186/` | ✅ done — I²C bring-up. First real check that the bus works: a known register against the datasheet reset value |
+| 4 | `battery/` | ✅ done — the divider ratio is still nominal, which affects the absolute voltage and not the code |
+| 5 | `soil/` | ✅ done — the wet calibration point is still a placeholder |
+| 6 | `eink/` | ✅ done — panel driver, both controllers, bring-up task |
+| 7 | App stage 1: measure + report | ✅ done — `main/app/`: the §2 sequence without sleep, on a one-minute timer, publishing to MQTT every cycle |
+| 8 | `power/` + the real cycle | Deep sleep, RTC ring buffer, bundled publish, radio up only on a publish cycle. Measure the actual sleep current here |
+| 9 | Calibration into NVS | The two soil points and the divider ratio, so a board can be calibrated without a rebuild |
+| 10 | The e-ink screen in the app | Last, because it is the only step whose absence loses no data |
+
+Steps 8-10 are what is left. The order is deliberate: sleep first, because the
+sleep current is the number the whole power budget rests on, and because the
+ring buffer and the publish bundling only mean something once RAM stops
+surviving between measurements.
 
 ---
 

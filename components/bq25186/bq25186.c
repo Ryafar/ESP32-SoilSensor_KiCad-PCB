@@ -165,6 +165,45 @@ esp_err_t bq25186_read_status(bq25186_status_t *status)
     return ESP_OK;
 }
 
+esp_err_t bq25186_read_charge_state(bq25186_charge_state_t *state, bool *vin_good)
+{
+    ESP_RETURN_ON_FALSE(state != NULL, ESP_ERR_INVALID_ARG, TAG, "state is NULL");
+
+    uint8_t stat0 = 0;
+    /* STAT0 only, not bq25186_read_status(): that also reads FLAG0, which
+     * clears on read, and a caller asking "is it charging" would silently eat
+     * the fault flags. */
+    ESP_RETURN_ON_ERROR(bq25186_read_reg(BQ25186_REG_STAT0, &stat0), TAG, "STAT0");
+
+    *state = (bq25186_charge_state_t)((stat0 & BQ25186_STAT0_CHG_STAT_MASK) >>
+                                      BQ25186_STAT0_CHG_STAT_SHIFT);
+    if (vin_good != NULL) {
+        *vin_good = (stat0 & BQ25186_STAT0_VIN_PGOOD_MASK) != 0;
+    }
+    return ESP_OK;
+}
+
+bool bq25186_charge_state_is_charging(bq25186_charge_state_t state)
+{
+    return state == BQ25186_CHARGE_CONSTANT_CURRENT ||
+           state == BQ25186_CHARGE_CONSTANT_VOLTAGE;
+}
+
+const char *bq25186_charge_state_name(bq25186_charge_state_t state)
+{
+    switch (state) {
+    case BQ25186_CHARGE_IDLE:
+        return "idle";
+    case BQ25186_CHARGE_CONSTANT_CURRENT:
+        return "constant current";
+    case BQ25186_CHARGE_CONSTANT_VOLTAGE:
+        return "constant voltage";
+    case BQ25186_CHARGE_DONE_OR_DISABLED:
+        return "done or disabled";
+    }
+    return "unknown";
+}
+
 esp_err_t bq25186_enter_ship_mode(void)
 {
     ESP_LOGW(TAG, "entering ship mode - system rail goes away now");
