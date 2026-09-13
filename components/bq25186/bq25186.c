@@ -46,6 +46,10 @@ esp_err_t bq25186_init(const bq25186_config_t *config)
             .mode = GPIO_MODE_INPUT_OUTPUT,
             .intr_type = GPIO_INTR_DISABLE,
         };
+        /* A pad left holding its level from before a deep sleep ignores
+         * gpio_config(), so the hold is released first - otherwise /CE is
+         * frozen at whatever the previous cycle chose. */
+        gpio_hold_dis(config->ce_gpio);
         ESP_RETURN_ON_ERROR(gpio_config(&ce_config), TAG, "/CE gpio config failed");
         s_ce_gpio = config->ce_gpio;
 
@@ -65,6 +69,14 @@ esp_err_t bq25186_set_ce_pin(bool enabled)
 
     /* /CE is active low: low enables charging. */
     return gpio_set_level(s_ce_gpio, enabled ? 0 : 1);
+}
+
+esp_err_t bq25186_ce_pin_hold(bool hold)
+{
+    ESP_RETURN_ON_FALSE(s_ce_gpio >= 0, ESP_ERR_INVALID_STATE, TAG,
+                        "this config does not drive /CE");
+
+    return hold ? gpio_hold_en(s_ce_gpio) : gpio_hold_dis(s_ce_gpio);
 }
 
 esp_err_t bq25186_deinit(void)

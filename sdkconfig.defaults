@@ -22,3 +22,10 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # NVS stays at 0x9000 with the same size in this layout, so the WiFi driver's RF
 # calibration data survives the change.
 CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# With deep sleep there is no long-running task: app_main runs the whole
+# measurement sequence - drivers, the e-paper init sequence, the MQTT publish -
+# and then sleeps. The IDF default of 3584 bytes was sized for an app_main that
+# only starts tasks and returns, and it overflowed on the first publish (the
+# stack protector caught it). 8 kB is what the measure task used to have.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

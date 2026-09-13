@@ -72,6 +72,13 @@
 #define SOIL_WARN_PERCENT           40      // drying out
 #define SOIL_ALERT_PERCENT          20      // water it now
 
+/* How far the reading has to move before the screen is worth rewriting. One
+ * percent is 15 mV on this scale, which is inside the probe's own noise - so
+ * without a step here the displayed value jitters by a point and every jitter
+ * would cost a full panel refresh. Two points is still finer than anyone reads
+ * off a plant pot. Crossing a colour threshold redraws regardless. */
+#define SOIL_DISPLAY_STEP_PERCENT   2
+
 /* --- Battery / charger BQ25186 ------------------------------------------- */
 #define PIN_I2C_SDA        18
 #define PIN_I2C_SCL        19
@@ -180,7 +187,10 @@
  * n-th measurement pays for the radio. 5 min x 6 = one publish every half hour
  * is the design target (product design §2).
  *
- * Both are turned down for bench work, where a half hour between log lines just
- * means waiting. The design values are in the comment, not lost. */
+ * The publish divisor is the design value: the samples in between are kept in
+ * RTC memory and sent as one bundle, so nothing is lost by talking to the
+ * broker less often. Only the interval is turned down for bench work, where
+ * five minutes between log lines just means waiting - at 60 s a bundle of six
+ * arrives every six minutes instead of every half hour. */
 #define MEASUREMENT_INTERVAL_S      60      // design: 5 * 60
-#define PUBLISH_EVERY_N_MEASUREMENTS 1      // design: 6
+#define PUBLISH_EVERY_N_MEASUREMENTS 6

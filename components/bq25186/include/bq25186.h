@@ -139,6 +139,20 @@ esp_err_t bq25186_set_charging_enabled(bool enabled);
  * driven. */
 esp_err_t bq25186_set_ce_pin(bool enabled);
 
+/* Locks the /CE pad at its current level so it survives deep sleep, where
+ * digital pads otherwise go high-impedance and the board's pull-up would take
+ * over - disabling charging for the whole sleep interval, i.e. almost always.
+ *
+ * On targets that hold a single IO through deep sleep on their own - the C6
+ * does, SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP - this is all that is needed.
+ * Elsewhere the caller also has to arm gpio_deep_sleep_hold_en(). Releasing
+ * happens in bq25186_init(), because a held pad ignores gpio_config() and the
+ * symptom would be a /CE that never moves again after the first wake.
+ *
+ * Hold it only while charging is enabled. Held low with VIN gone, the pull-up
+ * keeps drawing ~330 uA until something notices. */
+esp_err_t bq25186_ce_pin_hold(bool hold);
+
 esp_err_t bq25186_read_status(bq25186_status_t *status);
 
 /* CHG_STAT, the two bits of STAT0 that say what the charger is doing. */

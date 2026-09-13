@@ -3,6 +3,7 @@
 #include "app_screen.h"
 #include "config.h"
 #include "eink.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -14,23 +15,45 @@ static const char *TAG = "app_display";
  * enough that ADC noise does not trigger a 21-second refresh. */
 #define BATTERY_COMPARE_STEP_MV 50
 
-/* What the glass is currently showing, in the terms that decide the picture.
- * The moisture colour is a function of the percentage, so it needs no field of
- * its own - if the percentage is unchanged, the colour is too. */
+/* What the glass is currently showing, in the terms that decide the picture. */
 typedef struct {
     int soil_percent;
+    int soil_level;     // which colour band the percentage falls in
     int battery_step;
     bool charging;
     bool battery_low;
 } shown_state_t;
 
-static bool s_have_frame;
-static shown_state_t s_shown;
+/* Both survive deep sleep, and that is the difference between a device that
+ * refreshes when the reading changes and one that spends 21 seconds redrawing
+ * the same picture on every single wake. RAM is cleared between cycles; RTC
+ * memory is not. */
+static RTC_DATA_ATTR bool s_have_frame;
+static RTC_DATA_ATTR shown_state_t s_shown;
+
+/* The colour band, so that crossing a threshold redraws even when the
+ * percentage moved by less than the step below. Same thresholds app_screen
+ * draws with; kept as a number rather than the component's enum so this file
+ * does not have to care what the panel can show. */
+static int soil_level_of(int soil_percent)
+{
+    if (soil_percent < 0) {
+        return 0;
+    }
+    if (soil_percent <= SOIL_ALERT_PERCENT) {
+        return 1;
+    }
+    if (soil_percent <= SOIL_WARN_PERCENT) {
+        return 2;
+    }
+    return 3;
+}
 
 static shown_state_t state_of(const app_sample_t *sample, bool battery_low)
 {
     return (shown_state_t){
         .soil_percent = sample->soil_percent,
+        .soil_level = soil_level_of(sample->soil_percent),
         .battery_step = sample->battery_mv / BATTERY_COMPARE_STEP_MV,
         .charging = sample->charging,
         .battery_low = battery_low,
@@ -39,8 +62,19 @@ static shown_state_t state_of(const app_sample_t *sample, bool battery_low)
 
 static bool differs(const shown_state_t *a, const shown_state_t *b)
 {
-    return a->soil_percent != b->soil_percent || a->battery_step != b->battery_step ||
-           a->charging != b->charging || a->battery_low != b->battery_low;
+    /* A reading appearing or disappearing is always worth a redraw: dashes and
+     * a number are not a small difference. */
+    if ((a->soil_percent < 0) != (b->soil_percent < 0)) {
+        return true;
+    }
+
+    const int soil_moved = a->soil_percent > b->soil_percent
+                               ? a->soil_percent - b->soil_percent
+                               : b->soil_percent - a->soil_percent;
+
+    return soil_moved >= SOIL_DISPLAY_STEP_PERCENT || a->soil_level != b->soil_level ||
+           a->battery_step != b->battery_step || a->charging != b->charging ||
+           a->battery_low != b->battery_low;
 }
 
 void app_display_update(const app_sample_t *sample, bool battery_low)

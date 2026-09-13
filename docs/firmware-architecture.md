@@ -524,16 +524,16 @@ and so that unresolved hardware questions block as little as possible.
 | 6 | `eink/` | ✅ done — panel driver, both controllers, bring-up task |
 | 7 | App stage 1: measure + report | ✅ done — `main/app/`: the §2 sequence without sleep, on a one-minute timer, publishing to MQTT every cycle |
 | 8 | `/CE` control + the screen in the app | ✅ done — charging is enabled only while VIN is present (hardware README §4.2a), and the panel is redrawn when the picture would differ |
-| 9 | `FLAG0` in the app | The charger's latched events are invisible today, and they clear on read - so this has to land before the device starts sleeping through them |
-| 10 | `power/` + the real cycle | Deep sleep, RTC ring buffer, bundled publish, radio up only on a publish cycle, `/CE` held across sleep, `rgb_deinit()` and `eink_power_off()` before it. Measure the actual sleep current here |
-| 11 | Calibration into NVS | The two soil points and the divider ratio, so a board can be calibrated without a rebuild |
+| 9 | Deep sleep | ✅ done — measure once per boot, radio up only on a publish cycle, `/CE` held across sleep, LED dark and RMT released before it, RTC memory for what has to survive. **The sleep current still has to be measured** |
+| 10 | `FLAG0` in the app | The charger's latched events are invisible, and they clear on read - a sleeping device loses them unseen. Next |
+| 11 | RTC ring buffer + bundled publish | ✅ done — samples accumulate in RTC memory, the radio runs every 6th wake, and the buffer is cleared only on a PUBACK |
+| 12 | SNTP and timestamps | §5. Samples carry an age today, which is enough to place them but not to name a time |
+| 13 | Calibration into NVS | The two soil points and the divider ratio, so a board can be calibrated without a rebuild |
 
-Steps 9-11 are what is left. The order is deliberate: the charger's latched
-flags first, because they are consumed by whoever reads them and a sleeping
-device would lose them unnoticed; then sleep, because the sleep current is the
-number the whole power budget rests on, and because the ring buffer and the
-publish bundling only mean something once RAM stops surviving between
-measurements.
+Steps 10, 12 and 13 are what is left, and the first real task is not code: put a
+meter in the USB lead and find out what the board actually draws asleep.
+Everything in §3.5 of the product design is arithmetic until that number
+exists.
 
 ---
 

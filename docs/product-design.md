@@ -21,22 +21,44 @@ an MQTT publish with Home Assistant discovery, and the e-paper screen - on a
 one-minute timer instead of a deep-sleep cycle, so it can be watched in a
 terminal.
 
-The screen is redrawn only when the picture would actually differ, which is
-policy rather than an optimisation: a refresh costs 2.5 s on the black/white
-panel and about 21 s on the four-colour one, with the panel rail up throughout,
-and the displayed values change far more slowly than the measurement interval.
+The screen is redrawn on a **reporting cycle only, and only when the picture
+would actually differ** - two gates, both load-bearing:
+
+* A refresh costs 2.5 s on the black/white panel and about 21 s on the
+  four-colour one, with the rail up throughout: order 0.1 mAh a time. At one
+  per wake that is roughly 29 mAh a day, more than everything else on the board
+  combined. So the panel shares the radio's cadence: every 6th measurement.
+* The change test alone would not be enough anyway. One percentage point is
+  15 mV on this scale, inside the probe's own noise, so the displayed value
+  jitters and every jitter would look like a change. `SOIL_DISPLAY_STEP_PERCENT`
+  requires two points of movement - unless a colour threshold is crossed, or the
+  reading appears or disappears, which redraw immediately.
+
 The panel rail goes down after every refresh - e-paper holds its image with no
-power.
+power - and the comparison state lives in RTC memory, so both gates keep working
+across sleep cycles. Without that state, every wake would redraw the same
+picture.
+
+The low-battery screen is the exception and ignores both gates: it goes up
+immediately, because the cycle it appears on is the last one before ship mode.
+
+Three things survive a cycle, all in RTC memory: the measurement counter, the
+last drawn screen, and whether Home Assistant discovery has been sent. Nothing
+else does, and that is deliberate - there is no state to get subtly wrong over
+a week of uptime, because there is no uptime.
 
 Not implemented yet, and each one changes what the numbers mean:
 
-* **Deep sleep** (§2, §3.5). The firmware loops in a task; nothing measures the
-  sleep current yet, so the budget below is still arithmetic.
+* **The sleep current** (§3.5). Deep sleep itself is implemented - the firmware
+  measures once per boot and sleeps - but nobody has put a meter in the USB lead
+  yet, so the budget below is still arithmetic.
 * **Ship mode on a flat cell** (§3.2). The branch is taken and logged, but
   `APP_ALLOW_SHIP_MODE` in `app_run.c` is 0 - it opens the BATFET, and a
   threshold bug on the bench would shut the board down on every power-up.
-* **The RTC ring buffer and bundled publishing** (§4, §6.2). Every measurement
-  is published on its own, which §6.2 calls the right first implementation.
+* **Timestamps and SNTP** (§5). Samples carry a sequence number and an age, not
+  a wall-clock time.
+* **The charger's latched FLAG0 events.** Nothing reads them, and they clear on
+  read - so a fault that came and went between two wakes leaves no trace.
 * **Calibration from NVS** (§7). Compile-time constants only, and the wet point
   is a placeholder.
 
@@ -197,7 +219,15 @@ flash endurance on data that is about to be transmitted anyway.
 
 The ring buffer is sized at 24 slots — two hours of samples — so a broker that
 is down for an hour costs nothing. On overflow the oldest sample is dropped:
-recent soil moisture is worth more than old soil moisture.
+recent soil moisture is worth more than old soil moisture, and the number of
+dropped samples is published alongside the data so a gap in a graph has an
+explanation rather than being a mystery.
+
+Implemented in `main/app/app_buffer.c`. Two rules make it work: a sample is
+buffered *before* any attempt to publish, so a failed transmission is not a lost
+reading, and the buffer is cleared **only** after the broker has acknowledged
+the message. A missing PUBACK, a refused connection or no association at all all
+leave the samples in place, and the next cycle sends more rather than less.
 
 ---
 
@@ -250,9 +280,15 @@ consumer that can backfill (InfluxDB, or an HA automation writing to the
 recorder), which is work on the server, not in firmware.
 
 The alternative — publishing every 5 minutes and skipping the bundle — trades
-that away for six times as many WiFi cycles. That is the wrong trade for a
-device on a 500 mAh cell, but it is the right first implementation, because it
-proves the whole chain with none of the buffering logic (see the build stages).
+that away for six times as many WiFi cycles. That was the right first
+implementation, because it proved the whole chain with none of the buffering
+logic; now that the buffer exists, `PUBLISH_EVERY_N_MEASUREMENTS` is back to the
+design value of 6.
+
+Each bundle entry carries `age_s` rather than a timestamp. There is no SNTP yet,
+so an absolute time would be seconds since this board last cold-booted, which no
+consumer can interpret; an age can be subtracted from the time of receipt and is
+correct whether or not a clock was ever synchronised.
 
 ---
 
