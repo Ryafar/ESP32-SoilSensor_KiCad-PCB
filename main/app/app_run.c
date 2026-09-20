@@ -56,13 +56,36 @@ static const char *TAG = "app";
 
 #define I2C_TIMEOUT_MS 100
 
-/* Ship mode is the plan for a flat cell (product design §3.2), and it is not
- * armed while the firmware is being developed on a bench: it opens the BATFET,
- * and the only ways back are USB or a long press on TS/MR. A threshold bug
- * would therefore shut the board down every time it was powered from a cell.
- * The branch is still taken and logged, so the decision can be read in the
- * log - it just does not execute. */
-#define APP_ALLOW_SHIP_MODE 0
+/* ---------------------------------------------------------------------------
+ * Behaviour switches. Everything that decides what this firmware does rather
+ * than what the board is; the board itself is main/config.h. Six lines, all
+ * together, because hunting for them across a file is how one ends up shipping
+ * a build with a test override still in it.
+ *
+ *   APP_ALLOW_SHIP_MODE  1  disconnect the cell for real at the threshold
+ *   APP_ENABLE_NETWORK   1  bring the radio up and publish
+ *   APP_ENABLE_DISPLAY   1  draw on the panel
+ *   APP_USE_DEEP_SLEEP   1  sleep between measurements instead of looping
+ *   APP_FAKE_BATTERY_MV  0  pretend the cell is at this voltage
+ *   APP_FAKE_USB_ABSENT  0  pretend VIN is gone
+ *
+ * The last two are the only ones that must be 0 in anything but a test.
+ * --------------------------------------------------------------------------- */
+
+/* Ship mode on a flat cell (product design §3.2): at BATTERY_SHIP_MODE_MV with
+ * no USB, the firmware tells the charger over I2C to open the BATFET, and the
+ * cell is disconnected from the system before it can be discharged any
+ * further. That is the whole reason the firmware watches the voltage at all -
+ * the chip's own BUVLO at 3.0 V is a backstop, and 3.0 V under load is already
+ * deep discharge for a LiPo.
+ *
+ * Armed. 0 keeps the branch running and logging without the final write, which
+ * is what bench work wants when a threshold or the divider ratio is still being
+ * checked.
+ *
+ * It cannot lock the board out: ship mode is refused while VIN is present, so a
+ * board on USB always stays awake and flashable. */
+#define APP_ALLOW_SHIP_MODE 1
 
 /* 0 keeps the radio down: measure and log, publish nothing. For looking at
  * readings on a bench with no broker reachable, where the reconnect attempt
@@ -90,6 +113,25 @@ static const char *TAG = "app";
  * monitor has to reconnect - with a 60 s interval that makes the log nearly
  * unreadable. When sleeping, watch MQTT rather than the console. */
 #define APP_USE_DEEP_SLEEP 1
+
+/* Bench overrides for the battery branches, which are otherwise untestable
+ * without draining a cell for days or hanging a supply off the connector.
+ *
+ * APP_FAKE_BATTERY_MV replaces the measured cell voltage; 0 uses the real one.
+ * APP_FAKE_USB_ABSENT makes the decision believe VIN is gone. Both are needed
+ * together to reach LOW BATTERY on a bench: with USB actually present the
+ * sequence goes to CHARGE WAIT, which is correct and exactly what it should do.
+ *
+ * They fake the *decision inputs*, not the hardware. Charging keeps following
+ * the charger's real VIN bit, so a board on USB still charges while pretending
+ * not to be - the log line shows usb=0 next to charging enabled, which looks
+ * odd and is honest.
+ *
+ * Both are logged loudly on every cycle, because a forgotten override publishes
+ * a wrong battery voltage to Home Assistant for as long as it stays set. Never
+ * combine them with APP_ALLOW_SHIP_MODE unless that is precisely the test. */
+#define APP_FAKE_BATTERY_MV 0
+#define APP_FAKE_USB_ABSENT 0
 
 /* What the sequence decided this cycle. Logged by name, because "which branch
  * did it take" is the first question about any reading. */
@@ -365,13 +407,14 @@ static void measure_once(void)
      * (product design §2). */
     battery_reading_t battery = {0};
     const esp_err_t battery_err = battery_read(&battery);
-    const bool battery_valid = battery_err == ESP_OK;
+    bool battery_valid = battery_err == ESP_OK;
     if (battery_valid) {
         sample.battery_mv = battery.millivolts;
     } else {
         ESP_LOGW(TAG, "battery reading failed: %s", esp_err_to_name(battery_err));
     }
     sample.usb_present = battery_valid ? battery.usb_present : charger_vin_good;
+
 
     /* The charger's own VIN bit and the board's PGOOD pin should agree. When
      * they do not, one of them is not measuring what it is thought to measure -
@@ -381,6 +424,20 @@ static void measure_once(void)
                  battery.usb_present ? "present" : "absent",
                  charger_vin_good ? "present" : "absent");
     }
+
+#if APP_FAKE_BATTERY_MV
+    ESP_LOGW(TAG, "APP_FAKE_BATTERY_MV is set: reporting %d mV instead of the "
+                  "measured %d mV", APP_FAKE_BATTERY_MV, sample.battery_mv);
+    battery.millivolts = APP_FAKE_BATTERY_MV;
+    sample.battery_mv = APP_FAKE_BATTERY_MV;
+    battery_valid = true;
+#endif
+#if APP_FAKE_USB_ABSENT
+    ESP_LOGW(TAG, "APP_FAKE_USB_ABSENT is set: the decision below believes VIN "
+                  "is gone (it is %s)", sample.usb_present ? "present" : "absent");
+    battery.usb_present = false;
+    sample.usb_present = false;
+#endif
 
     const cycle_decision_t decision = decide(&battery, battery_valid, sample.usb_present);
 
@@ -408,16 +465,25 @@ static void measure_once(void)
         /* The screen goes up before ship mode, not after: ship mode opens the
          * BATFET and there is no "after" (product design §2). Whatever is on
          * the glass when the rail dies is what someone finds days later, so it
-         * has to be the low-battery frame. */
+         * has to be the low-battery frame.
+         *
+         * It is also the most expensive thing this branch does - 21 s with the
+         * panel rail up, on a cell that is already at the threshold. Worth it
+         * once: app_display only redraws when the picture changes, so the
+         * second and later low-battery cycles skip it and go straight to the
+         * I2C write. */
         update_display(&sample, true);
 #if APP_ALLOW_SHIP_MODE
+        ESP_LOGW(TAG, "cell at %d mV with no USB - disconnecting the battery",
+                 sample.battery_mv);
+
         /* Nothing after this line executes: the BATFET opens while the write is
-         * still being acknowledged. */
+         * still being acknowledged, and the system rail goes with it. */
         bq25186_enter_ship_mode();
 #else
-        ESP_LOGW(TAG, "cell is below %d mV with no USB - the final firmware "
-                      "enters ship mode here; APP_ALLOW_SHIP_MODE is 0",
-                 BATTERY_SHIP_MODE_MV);
+        ESP_LOGW(TAG, "cell at %d mV with no USB - the armed firmware would "
+                      "disconnect the battery here; APP_ALLOW_SHIP_MODE is 0",
+                 sample.battery_mv);
 #endif
         return;
     }

@@ -52,9 +52,13 @@ Not implemented yet, and each one changes what the numbers mean:
 * **The sleep current** (§3.5). Deep sleep itself is implemented - the firmware
   measures once per boot and sleeps - but nobody has put a meter in the USB lead
   yet, so the budget below is still arithmetic.
-* **Ship mode on a flat cell** (§3.2). The branch is taken and logged, but
-  `APP_ALLOW_SHIP_MODE` in `app_run.c` is 0 - it opens the BATFET, and a
-  threshold bug on the bench would shut the board down on every power-up.
+* ~~Ship mode on a flat cell~~ — armed. Below `BATTERY_SHIP_MODE_MV` with no
+  USB the firmware writes `SHIP_RST` over I²C, the BATFET opens and the cell is
+  disconnected. `APP_ALLOW_SHIP_MODE` in `app_run.c` still turns it back into a
+  log line for bench work. **The divider ratio is still the nominal 2.0**, and
+  2 % of resistor tolerance is 66 mV on the threshold — worth calibrating
+  against a multimeter now that the number decides when the board switches
+  itself off.
 * **Timestamps and SNTP** (§5). Samples carry a sequence number and an age, not
   a wall-clock time.
 * **The charger's latched FLAG0 events.** Nothing reads them, and they clear on

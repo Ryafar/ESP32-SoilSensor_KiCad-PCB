@@ -1,9 +1,16 @@
 /* Board configuration for the Soil Sensor, KiCad project rev 0.1.0.
  *
  * Single source of truth for pin assignment and system-wide constants.
- * Taken from docs/hardware/README.md - keep both in sync when the board
- * changes. Drivers under components/ stay board-agnostic and receive these
- * values through their init structs.
+ * Taken from docs/hardware/hardware_README.md - keep both in sync when the
+ * board changes. Drivers under components/ stay board-agnostic and receive
+ * these values through their init structs.
+ *
+ * What is NOT here: the switches that decide how the firmware behaves rather
+ * than what the board is. They sit in one block at the top of
+ * main/app/app_run.c - deep sleep on or off, ship mode armed, the radio, and
+ * the bench overrides that fake a flat cell. This file answers "what is
+ * wired where and at which voltage"; that block answers "what does the
+ * firmware do with it".
  */
 #pragma once
 
