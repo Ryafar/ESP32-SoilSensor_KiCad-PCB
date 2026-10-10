@@ -19,7 +19,7 @@
  * Two differences from the black/white part that matter to callers: BUSY is
  * asserted LOW here, and a refresh takes on the order of 20 seconds rather than
  * 2.5. On a coin-cell-budget device that second one is a design constraint, not
- * a detail - see docs/hardware/README.md.
+ * a detail - see docs/hardware/hardware-info.md.
  *
  * Not thread-safe, and single-instance: there is one panel on the board.
  */

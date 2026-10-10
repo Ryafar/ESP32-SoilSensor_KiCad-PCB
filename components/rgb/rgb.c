@@ -34,7 +34,7 @@ esp_err_t rgb_init(const rgb_config_t *config)
         .strip_gpio_num = config->gpio_num,
         .max_leds = 1,
         /* The WL-ICLED byte order is not confirmed yet - if red and green come
-         * out swapped, this is the knob to turn. See docs/hardware/README.md. */
+         * out swapped, this is the knob to turn. See docs/hardware/hardware-info.md. */
         .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
     };
     led_strip_rmt_config_t rmt_config = {

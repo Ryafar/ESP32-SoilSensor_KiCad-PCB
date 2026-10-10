@@ -1,5 +1,5 @@
 /* Bring-up task: WiFi scan, to answer whether the on-board ceramic antenna and
- * its matching network (L1-L4, see docs/hardware/README.md §1) actually work.
+ * its matching network (L1-L4, see docs/hardware/hardware-info.md §1) actually work.
  *
  * Scans every channel the configured country allows, repeats on a timer, and
  * logs each AP with its RSSI plus a summary line. The scan is active, so it
@@ -24,7 +24,7 @@
  *
  * Transmit bursts pull a few hundred mA. If the board browns out during a scan,
  * or the charger starts flagging VINDPM/VDPPM (see charger_test_task and
- * docs/hardware/README.md §4.4), that is a supply problem and says nothing
+ * docs/hardware/hardware-info.md §4.4), that is a supply problem and says nothing
  * about the antenna.
  *
  * Owns the whole WiFi lifecycle - NVS, netif, event loop, driver - because

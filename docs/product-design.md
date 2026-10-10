@@ -7,7 +7,7 @@ Third of three documents, and the authority on behaviour:
 
 | Document | Authority on | Answers |
 |---|---|---|
-| [hardware/README.md](hardware/README.md) | the board | which pin, which part, which voltage |
+| [hardware/hardware-info.md](hardware/hardware-info.md) | the board | which pin, which part, which voltage |
 | [firmware-architecture.md](firmware-architecture.md) | the code | which component owns what, what may include what |
 | this file | the device | what happens on a wake, and why |
 

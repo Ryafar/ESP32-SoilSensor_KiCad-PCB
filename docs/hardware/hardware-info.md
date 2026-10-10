@@ -1,4 +1,7 @@
-# Soil Sensor — Firmware
+# Soil Sensor — Hardware, rev 0.1.0
+
+Everything in this document describes board revision **0.1.0**. A new board
+revision gets its own pass through this file, not a silent edit.
 
 Battery-powered soil-moisture sensor built on the **ESP32-C6-FH4**, with an e-ink display, an addressable RGB status LED, a BQ25186 Li-ion charger (I²C), and a capacitive soil probe. Firmware targets **ESP-IDF + FreeRTOS**.
 
@@ -8,9 +11,12 @@ Hardware: KiCad project *Soil Sensor*, Rev 0.1.0 (Robin Bühler), dated
 | | |
 |---|---|
 | Schematic | [Schematic_v0.1.0.pdf](Schematic_v0.1.0.pdf) |
-| Board, top | [3D/TOP_3D.png](3D/TOP_3D.png) |
-| Board, bottom | [3D/BOT_3D.png](3D/BOT_3D.png) |
-| Board, angled | [3D/Side_3D.png](3D/Side_3D.png) |
+| Board, top | [3D/TOP_3D_rev0.1.0.png](3D/TOP_3D_rev0.1.0.png) |
+| Board, bottom | [3D/BOT_3D_rev0.1.0.png](3D/BOT_3D_rev0.1.0.png) |
+| Board, angled | [3D/Side_3D_rev0.1.0.png](3D/Side_3D_rev0.1.0.png) |
+| Dimensions for enclosure design | [pcb-dimensions.md](pcb-dimensions.md) |
+| Dimension drawing | [3D/soil-sensor_pcb_dimensions_rev0.1.0.pdf](3D/soil-sensor_pcb_dimensions_rev0.1.0.pdf) |
+| Board outline (DXF) | [3D/soil-sensor_pcb_outline_rev0.1.0.dxf](3D/soil-sensor_pcb_outline_rev0.1.0.dxf) |
 
 The schematic is the authority. Where this document and the PDF disagree, the
 PDF is right and this file needs fixing.

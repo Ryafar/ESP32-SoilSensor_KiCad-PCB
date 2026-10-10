@@ -5,7 +5,7 @@
  *      probe is unpowered and its output should collapse. A reading that does
  *      not change between off and on means the AO3401A is not switching, the
  *      probe is not plugged in, or GPIO14 is not the pin we think it is.
- *   2. How long does the probe need after power-up? docs/hardware/README.md §6
+ *   2. How long does the probe need after power-up? docs/hardware/hardware-info.md §6
  *      says "~tens of ms", which is a guess, not a measurement. So the task
  *      samples a ramp at fixed offsets after switching the rail on and logs the
  *      curve - read off where it flattens and put that into SOIL_SETTLE_MS.

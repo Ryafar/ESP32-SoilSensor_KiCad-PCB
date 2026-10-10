@@ -7,7 +7,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 # Console over native USB-Serial-JTAG (GPIO12/13), not UART. The board routes no
 # UART off-chip, and leaving the UART console enabled would drive GPIO16/17 -
 # GPIO16 is BAT_MEAS_EN here, so the console would fight the battery divider
-# enable. See docs/hardware/README.md §2.
+# enable. See docs/hardware/hardware-info.md §2.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # The panel choice is not a Kconfig symbol. It is a #define in

@@ -77,8 +77,11 @@ generated `sdkconfig` is not tracked in git.
 
 ## Documentation
 
-* [docs/hardware/README.md](docs/hardware/README.md) — the board: blocks, pin
+* [docs/hardware/hardware-info.md](docs/hardware/hardware-info.md) — the board: blocks, pin
   map, power strategy, charger configuration. Authority on anything electrical.
+* [docs/hardware/pcb-dimensions.md](docs/hardware/pcb-dimensions.md) — board
+  outline, holes, connector and button positions, heights: what an enclosure
+  has to fit around.
 * [docs/firmware-architecture.md](docs/firmware-architecture.md) — how the
   firmware is cut into components, who owns which peripheral, build order.
 * [docs/product-design.md](docs/product-design.md) — what the device does: the

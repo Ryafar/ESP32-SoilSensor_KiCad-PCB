@@ -2,7 +2,7 @@
  * which colour it just set.
  *
  * Doubles as the check for the open byte-order question in
- * docs/hardware/README.md - if the LED shows a different colour than the log
+ * docs/hardware/hardware-info.md - if the LED shows a different colour than the log
  * announces, the WL-ICLED wants RGB instead of the GRB currently configured in
  * components/rgb/rgb.c.
  *

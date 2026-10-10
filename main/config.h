@@ -1,7 +1,7 @@
 /* Board configuration for the Soil Sensor, KiCad project rev 0.1.0.
  *
  * Single source of truth for pin assignment and system-wide constants.
- * Taken from docs/hardware/hardware_README.md - keep both in sync when the
+ * Taken from docs/hardware/hardware-info.md - keep both in sync when the
  * board changes. Drivers under components/ stay board-agnostic and receive
  * these values through their init structs.
  *

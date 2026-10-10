@@ -23,7 +23,7 @@ extern "C" {
 
 /* Register map. Addresses are from the datasheet's register summary. The reset
  * values of 0x03, 0x04, 0x07 and 0x09 have been confirmed against a real board
- * (see docs/hardware/README.md §4.1a); the individual status bits in STAT0 and
+ * (see docs/hardware/hardware-info.md §4.1a); the individual status bits in STAT0 and
  * STAT1 have not, which is why bq25186_read_status() hands back raw bytes. */
 #define BQ25186_REG_STAT0        0x00 // charging state
 #define BQ25186_REG_STAT1        0x01 // input/battery/temperature state
@@ -46,7 +46,7 @@ extern "C" {
 #define BQ25186_ICHG_CTRL_CHG_DIS_MASK 0x80 // 1 = charging disabled
 #define BQ25186_ICHG_CTRL_ICHG_MASK    0x7F
 
-/* STAT0 (0x00). Bit positions from docs/hardware/README.md §4.4, which is the
+/* STAT0 (0x00). Bit positions from docs/hardware/hardware-info.md §4.4, which is the
  * datasheet §6.5.1.1 read against a real dump. Only the two fields the
  * application needs are named; the rest stay raw in bq25186_status_t until
  * something actually reads them. */

@@ -3,7 +3,7 @@
 How this firmware is cut into components, who owns which hardware resource, and
 in what order the remaining pieces get built.
 
-Companion to [hardware/README.md](hardware/README.md), which describes the board
+Companion to [hardware/hardware-info.md](hardware/hardware-info.md), which describes the board
 and is the authority on pins, part numbers and electrical behaviour. This
 document is the authority on code structure. When the two disagree, the
 hardware document wins and this one gets fixed.
