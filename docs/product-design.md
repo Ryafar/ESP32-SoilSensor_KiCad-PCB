@@ -156,7 +156,8 @@ sags below 3.3 V the moment WiFi transmits, so a single threshold produces a
 device that shuts down, gets plugged in, boots, and shuts down again.
 
 **While USB is present the device never enters ship mode.** Ship mode opens the
-BATFET and the only ways back are USB or a TS/MR long press — so entering it
+BATFET and the only ways back are USB or a long press on SW3 (the charger's
+TS/MR button) — so entering it
 while charging would strand a device that is already being rescued.
 
 Between 3.3 V and 3.5 V with USB present the device is in CHARGE WAIT: awake
@@ -344,7 +345,8 @@ numbers.
 ## 8. Open decisions
 
 * **How calibration gets into NVS.** A bring-up task that writes it, a
-  serial command, or a long press on SW3 while the probe is in a known state.
+  serial command. Not SW3: it sits on the charger's TS/MR pin, not on the MCU,
+  and its long press is ship mode.
   Until one exists, the values are compile-time constants.
 * **Wet calibration point** — needs the probe in water at working depth.
 * **What the display shows in CHARGE WAIT** versus a normal low battery, and

@@ -16,6 +16,7 @@ Hardware: KiCad project *Soil Sensor*, Rev 0.1.0 (Robin Bühler), dated
 | Board, angled | [3D/Side_3D_rev0.1.0.png](3D/Side_3D_rev0.1.0.png) |
 | Dimensions for enclosure design | [pcb-dimensions.md](pcb-dimensions.md) |
 | Dimension drawing | [3D/soil-sensor_pcb_dimensions_rev0.1.0.pdf](3D/soil-sensor_pcb_dimensions_rev0.1.0.pdf) |
+| E-paper module outline (WeAct) | [3D/WeAct-EpaperModule-1.54_board-shape.pdf](3D/WeAct-EpaperModule-1.54_board-shape.pdf) |
 | Board outline (DXF) | [3D/soil-sensor_pcb_outline_rev0.1.0.dxf](3D/soil-sensor_pcb_outline_rev0.1.0.dxf) |
 
 The schematic is the authority. Where this document and the PDF disagree, the
@@ -32,16 +33,17 @@ PDF is right and this file needs fixing.
 | MCU | ESP32-C6-FH4 (U3), chip-down QFN with on-board antenna | — |
 | Battery charger / power-path | BQ25186 (U5) | I²C (0x6A) + INT + CHARGE_EN + POWER_GOOD |
 | 3.3 V rail | XC6220B331MR LDO (U7), fed from charger SYS | — |
-| E-ink display | 8-pin FPC (CON1) | SPI (4-wire) + BUSY/RST/DC + power switch |
+| E-ink display | WeAct Studio 1.54" module on CON1: Molex PicoBlade 532610871, 8-pin, 1.25 mm pitch (also sold as "JST MX1.25") | SPI (4-wire) + BUSY/RST/DC + power switch |
 | RGB status LED | Würth WL-ICLED 1312020030000 (U2) | 1-wire (RMT), WS2812-compatible, runs on the 3.3 V rail |
 | Soil probe | JST PH, CON2, bottom side (S3B-PH-SM4 — see note below) | ADC + power switch |
 | Battery voltage sense | 2 × 100 kΩ divider + BSS138 switch | ADC + enable |
 | Charger thermistor | TH1, bottom side | none — wired to the charger's TS pin |
-| Buttons | RESET, BOOT (GPIO9), and SW3 | see §1.2 |
+| Buttons | RESET, BOOT (GPIO9), and SW3 (ship mode) | see §1.2 |
 | Battery | 1-cell LiPo, 500 mAh or 1000 mAh, on JST PH 2-pin (U6, S2B-PH-K-S) | — |
 | Main crystal | 40 MHz, Murata XRCGB40M000F1S1BR0 (U1) | — |
 | USB data protection | ECMF02-2AMX6 common-mode filter with ESD (U4), plus ESD9B5.0ST5G on VBUS (D1) | on the D+/D− pair |
 | Status LED | SML-P12PTT86R + 1.8 kΩ (LED1, R5) | GPIO17, see §2 |
+| Indicator LEDs | LED2 on VIN (USB present), LED3 on the 3.3 V rail | none — hardwired, see §2 "LED2 and LED3" |
 
 > **CON2 pin count.** The part number `S3B-PH-SM4` is a **3-circuit** JST PH
 > connector, and the bottom-side render shows three contacts. Earlier revisions
@@ -64,14 +66,14 @@ Read off the 3D renders. Everything is on the top side except where noted.
 | U2 | WL-ICLED RGB status LED | bottom edge, beside SW3 |
 | L5 | chip antenna, in a ground keep-out | top-left corner |
 | L1–L4 | RF matching network | around U3 and the antenna |
-| CON1 | e-ink FPC | top edge |
+| CON1 | e-ink cable connector, PicoBlade 8-pin | top edge |
 | CON2 | soil probe connector | **bottom side** |
 | TH1 | thermistor | **bottom side**, centre |
 | USB-C | power and USB-Serial-JTAG | bottom edge |
 | U1 | 40 MHz crystal | beside U3 |
 | U4 | USB common-mode filter | by the USB-C connector |
 | U6 | battery JST PH 2-pin | **bottom side** |
-| LED1 | plain status LED | see §2 |
+| LED1–LED3 | status LED and two hardwired indicators | bottom edge, left of USB-C |
 
 The MCU is a bare chip with an on-board antenna, not a shielded module. That
 matters for anything that touches the RF path — keep-out areas, enclosure
@@ -86,13 +88,13 @@ The renders show three switches, silkscreened `R`, `B` and `SW3`:
 |---|---|
 | `R` | RESET, straight to the MCU's EN pin |
 | `B` | BOOT, GPIO9 — hold low at reset for download mode |
-| `SW3` | **presumed** the charger's TS/MR button |
+| `SW3` | ship mode — the BQ25186's TS/MR button; enters and leaves ship mode |
 
-`SW3` matters more than its designator suggests. §3.2 says ship mode wakes on
-"valid VIN **or** TS/MR button long-press" — so if `SW3` is that button, it is
-the only way to bring the board back from ship mode without plugging in USB,
-and the low-battery design should say so. **Confirm against the schematic**:
-does `SW3` go to the BQ25186's TS/MR pin, or somewhere else?
+`SW3` matters more than its designator suggests. It goes to the charger, not
+to the MCU, and ship mode (§3.2) wakes on "valid VIN **or** TS/MR button
+long-press" — so `SW3` is the only way to bring the board back from ship mode
+without plugging in USB, and the only way to put an unprogrammed or hung board
+into it. Firmware never sees the button directly.
 
 ---
 
@@ -111,7 +113,9 @@ Read directly from the schematic. **Verify against your own board before flashin
 | SDO (MOSI) | GPIO7 | SPI MOSI (display is write-only) |
 | PAPER_POWER | GPIO23 | display rail load switch, **active low** — drive to GND to power the panel |
 
-**Panel:** WeAct Studio 1.54" e-paper module, 8-pin FPC. Two variants exist and
+**Panel:** WeAct Studio 1.54" e-paper module, connected to CON1 (Molex
+PicoBlade, 8-pin, 1.25 mm pitch — the same connector is sold as "JST MX1.25")
+by an 8-wire cable. Two variants exist and
 the firmware supports both. Which one is fitted is one `#define` in
 `components/eink/include/eink_panel.h` — set one of the two to 1 and rebuild:
 
@@ -190,12 +194,29 @@ Out of reset and in deep sleep the pad is high-impedance and the LED is dark,
 which is the right default; firmware drives it low so that "off" is a level
 rather than an assumption about what the ROM left behind.
 
+### LED2 and LED3 — hardwired indicators
+
+Neither is connected to the MCU, so firmware cannot switch them.
+
+| LED | Lit when | Cost on battery |
+|---|---|---|
+| LED2 | VIN present, i.e. USB plugged in | none — only lit while USB supplies the board |
+| LED3 | the 3.3 V rail is up | **always**, deep sleep included |
+
+**LED3 has to be desoldered on a board that runs from the cell.** Deep sleep
+only stops the MCU; the 3.3 V rail stays up, so LED3 burns its current around
+the clock. At the ~0.8 mA LED1 would draw (see above) that is about 80× the
+~10 µA sleep target and flattens a 500 mAh cell in under four weeks — the deep
+sleep design is pointless while it is fitted. In ship mode the rail is gone and
+LED3 is dark, so it does not affect that number. On a bench board powered from
+USB it is harmless and useful.
+
 ### System / boot
 | Signal | GPIO | Notes |
 |---|---|---|
 | BOOT button (`B`) | GPIO9 | strapping pin: LOW at reset → download mode |
 | RESET button (`R`) | — | wired to EN, not visible to firmware |
-| `SW3` | — | presumed charger TS/MR, see §1.2 — not an MCU pin |
+| `SW3` | — | charger TS/MR, ship mode on/off, see §1.2 — not an MCU pin |
 | USB D- / D+ | GPIO12 / GPIO13 | native USB-Serial-JTAG — the only console/log interface for this project |
 
 > **UART not used.** All console/logging goes over USB-Serial-JTAG (GPIO12/13). That frees GPIO16 to serve as `BAT_MEAS_EN` with no conflict.
@@ -223,7 +244,7 @@ Acting at 3.3 V protects the LiPo: 3.0 V under load is already deep discharge on
 |---|---|---|---|
 | Charger/Adapter | on | — | (USB present) |
 | Battery | on | ~4 µA | — |
-| **Ship** | **off** | ~3.2 µA | valid VIN (USB) **or** TS/MR button long-press |
+| **Ship** | **off** | ~3.2 µA | valid VIN (USB) **or** TS/MR button (`SW3`) long-press |
 | Shutdown | off | ~15 nA | valid VIN or button |
 
 **Ship mode is the "off until charged" state** you want for low battery. When the ESP32 commands ship mode over I²C, the BATFET opens and the system rail (hence the ESP32 itself) loses power. So:
@@ -233,7 +254,7 @@ Acting at 3.3 V protects the LiPo: 3.0 V under load is already deep discharge on
 ### 3.3 Design decision to confirm
 
 Two ways to handle low battery:
-- **(A) Ship mode** — fully powers down the board (~3.2 µA). Wakes only on USB insertion or button. Lowest possible drain; loses all RTC state.
+- **(A) Ship mode** — fully powers down the board (~3.2 µA). Wakes only on USB insertion or a long press on `SW3`. Lowest possible drain; loses all RTC state.
 - **(B) ESP32 deep sleep** — keeps the RTC alive, wakes on its own timer. Higher drain than ship mode, but the device can re-check the battery periodically and self-recover without USB.
 
 For "off until USB is reconnected," **(A) ship mode** matches your intent. Consider (B) only if you want the device to auto-recover after the battery relaxes/recovers slightly without user intervention.
@@ -587,7 +608,9 @@ To enter download mode manually: hold **BOOT** (GPIO9) low, tap **RESET**, relea
 - [x] Exact e-ink controller: the fitted module is the **four-colour** WeAct 1.54" (black/white/red/yellow), panel GDEM0154F51H, controller **JD79660**, 200×200, 2 bpp, ~21 s per refresh and no partial mode. The black/white variant (GDEH0154D67, **SSD1681**) is the other supported option — both drivers exist, see §2 "E-ink display".
 - [ ] Soil probe output range (for calibration).
 - [x] CON2 is **three** contacts: the schematic says `S3B-PH-SM4-TB`, a 3-circuit JST PH, top-entry SMD. The probe is powered by `SOIL_POWER` switching its supply, not by a dedicated enable line.
-- [ ] `SW3`: is it the charger's TS/MR wake button? Decides whether ship mode can be exited without USB.
+- [x] `SW3` is the charger's TS/MR button: it enters and leaves ship mode, so ship mode can be exited without USB.
+- [ ] **LED3 sits on the 3.3 V rail and is lit in deep sleep** (§2 "LED2 and LED3"). Desoldered on battery-powered boards for now; the fix in the next revision is to drop it, or move it onto a GPIO like LED1.
+- [x] CON1 is a Molex PicoBlade 532610871 (8-pin, 1.25 mm, "JST MX1.25") cable connector, not an FPC.
 - [x] `U1`, `U4`, `U6` identified from the schematic: `U1` is the **40 MHz main crystal** (Murata XRCGB40M000F1S1BR0) for the C6's oscillator — not to be confused with the 32.768 kHz RTC crystal, which this board deliberately does not have (§5 of the product design). `U4` is an **ECMF02-2AMX6** common-mode filter with integrated ESD protection on the USB D+/D− pair, with `D1` (ESD9B5.0ST5G) on VBUS. `U6` is the **battery connector**, JST PH 2-circuit `S2B-PH-K-S` — now in the §1 table.
 - [x] `LED1` is a plain status LED on **GPIO17**, lit by driving the pin high. See §2 "LED1".
 - [ ] The four ringed pads on the bottom side: test points, and for what?

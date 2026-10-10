@@ -9,6 +9,7 @@ until confirmed against the datasheet or the STEP model.
 | File | Contents |
 |---|---|
 | [3D/soil-sensor_pcb_dimensions_rev0.1.0.pdf](3D/soil-sensor_pcb_dimensions_rev0.1.0.pdf) | Dimension drawing, vector, prints 1:1 |
+| [3D/WeAct-EpaperModule-1.54_board-shape.pdf](3D/WeAct-EpaperModule-1.54_board-shape.pdf) | WeAct Studio 1.54" e-paper module: board outline and dimensions, from WeAct — for the display pocket in the lid |
 | [3D/soil-sensor_pcb_outline_rev0.1.0.dxf](3D/soil-sensor_pcb_outline_rev0.1.0.dxf) | Outline with radii, holes, keepout, top/bottom courtyards, button and LED centres on separate layers (mm, AutoCAD R2010, origin bottom left) |
 
 For an exact 3D model, export the board with all parts from KiCad via
@@ -110,6 +111,10 @@ is enough and keeps them from being pressed by accident.
 LED1 to LED3 are only 1.6 mm apart: give each its own light pipe or put divider
 walls between them, otherwise the light bleeds across.
 
+LED3 sits on the 3.3 V rail and is desoldered on battery-powered boards (see
+[hardware-info.md §2](hardware-info.md#led2-and-led3--hardwired-indicators)),
+so its light pipe is only useful on a bench unit.
+
 ## 6. Connectors and cable routing
 
 Besides USB-C there are three cable connectors: display on the top side, sensor
@@ -188,7 +193,8 @@ ribs for stability.
 * **Bottom side:** at least 7 mm for CON2 and U6; battery next to or below them,
   not under the antenna.
 * **Display:** the PicoBlade cable runs from CON1 (Y 32–37) up to the display —
-  allow for cable length and bend radius.
+  allow for cable length and bend radius. Module outline and dimensions:
+  [WeAct board shape](3D/WeAct-EpaperModule-1.54_board-shape.pdf).
 * **Sensor:** the probe sits in the soil, so the cable needs a gland or seal
   (e.g. PG7 or M8) and strain relief.
 * **Sealing:** cover the USB-C cutout with a rubber cap; a small
